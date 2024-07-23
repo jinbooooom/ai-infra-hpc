@@ -1,0 +1,1 @@
+/usr/local/bin/mpicxx -g -o test_mpi mpi_gdb.cpp -std=c++14

@@ -1,0 +1,38 @@
+
+
+# commit 格式
+# type(scope): subject
+# 即：commit类型(影响范围): 具体描述
+
+# 举例：
+# fix(log): fix the format error of log when printing
+# doc: increase the readme of each folder in this repo
+
+# type（必须）
+# type 指明 git commit 的类别，应该使用以下类型，也可根据团队自行增减
+#     feat: 新增功能
+#     fix: 修复 bug
+#     doc: 仅仅修改了文档，比如 README 等等
+#     test: 增加/修改测试用例，包括单元测试、集成测试等
+#     style: 修改了空行、缩进格式、引用包排序（不改变代码逻辑）、文件夹变更、文件名变更等
+#     perf: 优化相关内容，比如提升性能、体验、算法等
+#     refactor: 代码重构，没有新功能或者bug修复
+#     chore: 改变构建流程、或者增加依赖库、工具等
+#     revert: 回滚到上一个版本
+#     merge: 代码合并
+#     analysis：分析源码时，一些必要的注释
+#     tmp：临时保存
+
+# scope（可选）
+# scope用于说明 commit 影响的范围，根据不同项目有不同层次描述。若没有特殊规定，也可以描述影响的哪些功能等。
+
+# subject（必须）
+# subject 是 commit 目的的简短描述，不超过 50/80 个字符。
+
+
+
+
+
+
+
+
