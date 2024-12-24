@@ -4,7 +4,7 @@
 
 ## 基本概念
 
-### rdma 缩写
+### 缩写
 
 - Fabric：A local-area RDMA network is usually referred to as a fabric. 支持RDMA的局域网(LAN)
 
@@ -436,10 +436,6 @@ Verbs API分为用户态和内核态，分别以`ibv_`和`ib_`作为前缀。RDM
 ![image-20220829171242855](assets/rdma/image-20220829171242855.png)
 
 
-
-#### ABI
-
-ABI（Application Binary Interface）是应用程序间的二进制接口，本文中RDMA软件栈架构图中的Userspace和Kernel之间的uverbs接口就是一种ABI。ABI定义了运行时的程序之间交流的格式，比如参数以什么形式传递（分别写到指定的寄存器/使用栈）、以什么格式传递以及返回值放到哪里等等。
 
 ### MW
 
