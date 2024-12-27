@@ -1,16 +1,4 @@
-
-
-
-
-
-
-
-
-
-
-
-
-## GPU Direct
+## GPUDirect
 
 GPU Direct 是 NVIDIA 开发的一项技术，可实现 GPU 与其他设备（例如IB 网卡 (NIC) 和存储设备）之间的直接通信和数据传输，而不涉及 CPU。
 
@@ -57,9 +45,22 @@ GPUDirect RDMA 它允许 GPU 直接访问 RDMA 网络设备中的数据，无需
 
 启用 GPUDirect RDMA 的数据传输情况如下：![MLFrameworksPart2_Pic7](assets/readme/MLFrameworksPart2_Pic7.gif)
 
-
-
 ![img](assets/readme/v2-da6ac66f0c2b99d7bc053f6bf42661ae_1440w.jpg)GPUDirect RDMA 通过绕过主机内存和 CPU，直接在 GPU 和 RDMA 网络设备之间进行数据传输，显著降低传输延迟，加快数据交换速度，并可以减轻  CPU 负载，释放 CPU 的计算能力。另外，GPUDirect RDMA 技术允许 GPU 直接访问 RDMA  网络设备中的数据，避免了数据在主机内存中的复制，提高了数据传输的带宽利用率。
+
+## GDRCopy
+
+GDRCopy 是一个基于 GPUDirect RDMA 技术的低延迟 GPU 内存拷贝库，它允许 CPU 直接映射和访问 GPU  内存。GDRCopy 还提供了优化的拷贝 API，并被广泛应用于高性能通信运行时环境中，如 UCX、OpenMPI、MVAPICH 和  NVSHMEM。
+
+![magnum-io-cudaMemcpy-vs-GDRCopy](assets/readme/magnum-io-cudaMemcpy-vs-GDRCopy.svg)
+
+`cudaMemcpy` 利用 GPU 的 DMA 引擎在 CPU 和 GPU 内存之间传输数据，这会触发 DMA  引擎的操作，导致在小数据量时产生延迟开销和性能下降。而 GDRCopy 则允许 CPU 通过 BAR（Base Address  Register）映射直接访问 GPU 内存，从而实现了 GPU 和 CPU 内存之间的低延迟拷贝。
+
+![magnum-io-gdrcopy-h2d-and-d2h](assets/readme/magnum-io-gdrcopy-h2d-and-d2h.svg)
+
+## 参考
+
+- [Machine Learning Frameworks Interoperability, Part 2: Data Loading and Data Transfer Bottlenecks](https://developer.nvidia.com/blog/machine-learning-frameworks-interoperability-part-2-data-loading-and-data-transfer-bottlenecks/)
+- [Enable faster memory transfers between CPU and GPU with GDRCopy](https://developer.nvidia.com/gdrcopy)
 
 
 
