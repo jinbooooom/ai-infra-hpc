@@ -457,6 +457,78 @@ Verbs API分为用户态和内核态，分别以`ibv_`和`ib_`作为前缀。RDM
 
 **如果想要给MW配置远程写或者远程原子操作（Atomic）权限，那么它绑定到的MR必须有本地写权限，其他情况下两者权限互不干扰**：远端用户用MW，就要遵循MW的权限配置；远端用户用MR，就要遵循MR的权限配置。
 
+## RDMA 性能优化
+
+### 小数据优化延迟原理
+
+#### 快速了解IB通信中的PCIe原理
+
+![image-20241227161540194](assets/rdma/image-20241227161540194.png)
+
+IB卡（NIC）通常通过PCI Express（PCIe）插槽连接到服务器。PCIe I/O子系统的主要导体（conductor ）是根复合体（Roo Complex, RC）。
+
+RC将处理器和内存连接到PCIe结构。CPU和Memory和PCIe结构通过RC（Roo Complex, RC）将连接在一起。
+
+PCIe结构可以包括一个设备的层次结构。连接到PCIe结构的外围设备称为PCIe端点（PCIe endpoints）。
+
+PCIe协议由三层组成：事务层、数据链路层和物理层，对于IB通信来说，只需要了解最上层事务层即可。
+
+![image-20241227161418485](assets/rdma/image-20241227161418485.png)
+
+两种类型的传输层数据包（**Transaction Layer Packet**，TLP）：Memory Write（MWr）和Memory Read（MRd）。与独立的MWr TLP不同，MRd TLP与来自目标PCIe端点的“带数据完成”（ Completion with Data, CplD）事务耦合在一起，该事务包含启动器请求的数据。
+
+- **Memory Write (MWr) TLP**：MWr TLP是一种TLP类型，用于将数据写入目标设备的内存空间。这种操作是单向的，即发起设备（称为启动器）将数据发送到目标设备，而目标设备通常只需要发送一个完成信号（Completion）来确认接收，而不需要返回数据。
+
+- **Memory Read (MRd) TLP**：MRd TLP是一种TLP类型，用于从目标设备的内存空间读取数据。与MWr TLP不同，MRd TLP是双向的，即发起设备发送读请求，目标设备需要返回数据给发起设备。
+
+- **带数据完成（Completion with Data, CplD）**：在PCIe通信中，完成信号（Completion）用于确认一个请求已经完成。CplD是一种特殊的完成信号，它不仅确认请求完成，还包含启动器请求的数据。这种机制用于Memory Read操作，因为启动器需要从目标设备读取数据。
+
+#### [通信机制](https://www.rohitzambre.com/blog/2019/4/27/how-are-messages-transmitted-on-infiniband)
+
+`CPU`通知网卡（`NIC`）有消息要传输，`NIC`将做剩下的所有其他事情来传输数据，这样，`CPU`就可以更多做其他事情。然而，这种方法可能不利于小消息的通信性能。
+
+从`CPU`程序员的角度来看，存在一个传输队列（`Queue Pair`，`QP`）和完成队列（`Completion Queue`，`CQ`）。用户将他们的消息描述符（`Message Descriptor`，`MD`）（对应`Verbs`里的`Work Queue Element/Entry`，`WQE`）以`Verbs`形式`post`到传输队列，然后在`CQ`上轮询以确认所发布消息的完成。用户也可以要求得到有关完成情况的中断通知，但是，轮询方法是面向延迟的（更适合于要求低延迟的通信），因为关键路径中没有上下文切换到内核。消息在网络上的实际传输通过处理器芯片和网卡之间的协调来实现，使用内存映射`I/O`（`MMIO`）和直接内存访问（`DMA`）读写。下图描述了这个过程：
+
+<img src="assets/rdma/image-20241227161811950.png" alt="image-20241227161811950"  />
+
+步骤（0）：用户首先将`MD`（`Message Descriptor`，对应`Verbs`里的`WR`）排队到`TxQ`（对应`Verbs`里的`SQ`）中。然后，`CPU`（网络驱动程序）准备特定于设备的`MD`，其中包含`NIC`的标头和指向有效负载的指针。
+
+步骤（1）：使用8字节的原子写入内存映射位置，`CPU`（网络驱动程序）按门铃（1）通知`NIC`消息已准备好要发送。`RC`使用`MWr`（`Memory Write`）`PCIe`事务执行响门铃。
+
+步骤（2）：门铃响后，网卡通过`DMA`读取`MD`。`MRd` `PCIe`事务执行`DMA`读取。
+
+步骤（3）：（从`MD`知道待传输的数据在哪里）`NIC`将使用另一个`DMA`读取（另一个`MRd TLP`）从注册的内存区域获取有效负载。请注意，在`NIC`可以执行`DMA`读取之前，必须将虚拟地址转换为物理地址。
+（2-3：首先`MRd PCIe` `DMA`读取`MD`获取负载信息，然后`MRd TLP` `DMA`读取有效负载）
+
+步骤（4）：一旦网卡接收到有效载荷，它就会通过网络传输读取到的数据。成功传输后，`NIC`从目标`NIC`接收确认（`ACK`）。
+
+步骤（5）：接收到`ACK`后，`NIC`将通过`DMA`方式`write`（使用`MWr TLP`）一个完成队列条目（`CQE`，`Mellanox InfiniBand`中为64字节）到与`TxQ`关联的`CQ`。然后`CPU`将轮询此`CQE`进行判断和后续操作。
+
+每个`post`的关键数据路径需要一次`MMIO`写入、两次`DMA`读取和一次`DMA`写入。其中：
+
+- **一次`MMIO`写入**：按门铃对映射内存的写入
+- **两次`DMA`读取**：第一次读取`MD`，第二次根据`MD`读取负载
+- **一次`DMA`写入**：写入`WC`
+
+### 小数据优化延迟方法
+
+`Inlining`、`Postlist`、`Unsigned Completion`和`Programmed I/O`是`IB`（InfiniBand）的操作特性，有助于减少开销。考虑到`QP`（Queue Pair）的深度为`n`，将在下面描述它们。
+
+#### Postlist：
+
+`IB`允许应用程序通过调用`ibv_post_send`来发布`WQE`（Work Queue Element）的链接列表，而不是每次只发布一个`WQE`。它可以将门铃响的次数从`n`减少到`1`。
+
+#### Inlining/内联（IBV_SEND_INLINE）：
+
+`CPU`（网络驱动程序）将数据复制到`WQE`中。因此，通过对`WQE`的第一次`DMA`读取，`NIC`也获得了有效载荷，从而消除了针对有效载荷的第二次`DMA`读取。
+
+网卡驱动注册了一块`MEM`内存，用户程序`post WQ`的时候往里面写入`WQE`。如果要发送的数据较大，数据放在用户空间的`buff`，那么`WQE`里面的指针指向`buff`。网卡从`MEM`里面读出`WQE`，然后根据`WQE`里面的指针，再去`buff`读取数据。如果要发送的数据较小，就直接把数据放到`WQE`的`payload`区域，一同放入`MEM`内存。这样网卡从`MEM`里面读出`WQE`，就不再需要再去`buff`读取数据。
+
+#### [Unsigned Completions（IBV_SEND_SIGNALED）](https://blog.csdn.net/bandaoyu/article/details/119145598)：
+
+`IB`默认是为每个`WQE`发送一个完成信号，但`IB`也允许应用程序关闭指定的`WQE`的完成信号。注意：每隔`post n`个关闭信号的`WQE`，就要`post`一个开启完成信号的`WQE`。因为只有产生`CQE`（Completion Queue Entry），程序去读取了`CQE`之后才会清理发送队列`SQ`（Send Queue）的`SQE`（Send Queue Element）。如果一直没有`CQE`产生，则读取不到`CQE`，也就不会清理发送队列`SQ`，很快发送队列`SQ`就会撑满。
+关闭`Completion`可以减少`NIC`对`CQE`的`DMA writes`。此外，应用程序轮询更少的`CQE`，从而减少了开销。
+
 # RDMA 环境
 
 ## RDMA 环境部署
@@ -667,4 +739,3 @@ $ vim /etc/systemd/user.conf
 ```
 
 ![image-20221103141434553](assets/rdma/image-20221103141434553.png)
-
