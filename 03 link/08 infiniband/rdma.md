@@ -514,9 +514,36 @@ PCIe协议由三层组成：事务层、数据链路层和物理层，对于IB�
 
 `Inlining`、`Postlist`、`Unsigned Completion`和`Programmed I/O`是`IB`（InfiniBand）的操作特性，有助于减少开销。考虑到`QP`（Queue Pair）的深度为`n`，将在下面描述它们。
 
-#### Postlist：
+#### 避免数据路径中出现控制面操作。
+
+数据路径中不要出现控制面操作。控制面操作基本都很耗时。数据路径上最好只出现数据面操作 api（post api 和 poll cq 相关 api）
+
+#### 一次 post 多个 WR：
 
 `IB`允许应用程序通过调用`ibv_post_send`来发布`WQE`（Work Queue Element）的链接列表，而不是每次只发布一个`WQE`。它可以将门铃响的次数从`n`减少到`1`。
+
+多个 WR 合并成一个链表通过一个 post 请求下发：
+
+```C++
+struct ibv_send_wr wr1, wr2, wr3;
+struct ibv_send_wr *bad_wr;
+
+wr1.wr_id = 1;
+wr1.next = &wr2;
+// 其他字段初始化...
+
+wr2.wr_id = 2;
+wr2.next = &wr3;
+// 其他字段初始化...
+
+wr3.wr_id = 3;
+wr3.next = NULL;  // 链表结束
+// 其他字段初始化...
+
+int ret = ibv_post_send(qp, &wr1, &bad_wr);
+```
+
+同理，一次轮询多个 CQ，减少轮询次数也能优化延迟。
 
 #### Inlining/内联（IBV_SEND_INLINE）：
 
@@ -528,6 +555,16 @@ PCIe协议由三层组成：事务层、数据链路层和物理层，对于IB�
 
 `IB`默认是为每个`WQE`发送一个完成信号，但`IB`也允许应用程序关闭指定的`WQE`的完成信号。注意：每隔`post n`个关闭信号的`WQE`，就要`post`一个开启完成信号的`WQE`。因为只有产生`CQE`（Completion Queue Entry），程序去读取了`CQE`之后才会清理发送队列`SQ`（Send Queue）的`SQE`（Send Queue Element）。如果一直没有`CQE`产生，则读取不到`CQE`，也就不会清理发送队列`SQ`，很快发送队列`SQ`就会撑满。
 关闭`Completion`可以减少`NIC`对`CQE`的`DMA writes`。此外，应用程序轮询更少的`CQE`，从而减少了开销。
+
+#### 与 IB 网卡同 NUMA
+
+RDMA 应用绑定的 CPU 核心，最好与 RDMA 网卡在同一个 NUMA 下
+
+#### 其它未验证的
+
+- 避免在一个 WR 中塞多个 sge，一个 wr 里一个 sge 效果最好。【不知道原因，尚未验证】
+
+
 
 # RDMA 环境
 
