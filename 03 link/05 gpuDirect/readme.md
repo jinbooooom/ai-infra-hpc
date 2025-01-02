@@ -4,7 +4,9 @@ GPU Direct 是 NVIDIA 开发的一项技术，可实现 GPU 与其他设备（�
 
 传统上，当数据需要在 GPU 和另一个设备之间传输时，数据必须通过 CPU，从而导致潜在的瓶颈并增加延迟。使用 GPUDirect，网络适配器和存储驱动器可以直接读写 GPU 内存，减少不必要的内存消耗，减少 CPU 开销并降低延迟，从而显著提高性能。GPU Direct 技术包括 GPUDirect  Storage、GPUDirect RDMA、GPUDirect P2P。
 
-### **GPUDirect Storage**
+### **GDS（GPUDirect Storage）**
+
+DeepSpeed框架 ZeRo-infinity级优化支持将模型存储在NVME中，解决超大模型训练时显存不足的问题。
 
 GPUDirect Storage 允许存储设备和 GPU 之间进行直接数据传输，绕过 CPU，减少数据传输的延迟和 CPU 开销。
 
@@ -21,6 +23,14 @@ GPUDirect Storage 的主要特点和优势包括：
 
 增强的可扩展性：GPUDirect Storage 支持多 GPU 配置，允许多个 GPU 同时访问存储设备。这种可扩展性对于需要大规模并行处理和数据分析的应用至关重要。
 
+![image-20250102143811067](assets/readme/image-20250102143811067.png)
+
+![image-20250102144025001](assets/readme/image-20250102144025001.png)
+
+![image-20250102144007470](assets/readme/image-20250102144007470.png)
+
+![image-20250102143903609](assets/readme/image-20250102143903609.png)
+
 ### **GPUDirect P2P**
 
 某些工作负载需要位于同一服务器中的两个或多个 GPU 之间进行数据交换，在没有 GPUDirect P2P 技术的情况下，来自 GPU 的数据将首先通过 CPU 和 PCIe 总线复制到主机固定的共享内存。然后，数据将通过 CPU 和 PCIe 总线从主机固定的共享内存复制到目标 GPU，数据在到达目的地之前需要被复制两次、
@@ -33,7 +43,7 @@ GPUDirect Storage 的主要特点和优势包括：
 
 ![v2-a6bccf8e702aaf51d320d747c74c13dc_b](assets/readme/v2-a6bccf8e702aaf51d320d747c74c13dc_b.gif)
 
-### GPUDirect RDMA
+### GDR（GPUDirect RDMA）
 
 
 
