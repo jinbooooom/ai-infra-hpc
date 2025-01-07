@@ -3,6 +3,7 @@
 #include "../common/common.h"
 
 /*
+ * 6 行 8 列的矩阵，用二维 grid 和 block，求和。本程序打印矩阵中的坐标与 grid 和 block 的关系。
  * This example helps to visualize the relationship between thread/block IDs and
  * offsets into data. For each CUDA thread, this example displays the
  * intra-block thread ID, the inter-block block ID, the global coordinate of a
@@ -78,7 +79,7 @@ int main(int argc, char **argv)
     CHECK(cudaMemcpy(d_MatA, h_A, nBytes, cudaMemcpyHostToDevice));
 
     // set up execution configuration
-    dim3 block(4, 2);
+    dim3 block(4, 2); // x 方向 4 个元素，y 方向 2 个元素，即 2 行 4 列
     dim3 grid((nx + block.x - 1) / block.x, (ny + block.y - 1) / block.y);
 
     // invoke the kernel

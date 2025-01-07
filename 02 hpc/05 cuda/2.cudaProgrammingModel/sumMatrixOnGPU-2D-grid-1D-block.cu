@@ -1,19 +1,16 @@
-#include "../common/common.h"
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include "../common/common.h"
 
 /*
- * This example demonstrates a simple vector sum on the GPU and on the host.
- * sumArraysOnGPU splits the work of the vector sum across CUDA threads on the
- * GPU. A 1D thread block and 2D grid are used. sumArraysOnHost sequentially
- * iterates through vector elements on the host.
+ * 使用 2 维 grid 和 1 维 block 对矩阵求和
  */
 
 void initialData(float *ip, const int size)
 {
     int i;
 
-    for(i = 0; i < size; i++)
+    for (i = 0; i < size; i++)
     {
         ip[i] = (float)(rand() & 0xFF) / 10.0f;
     }
@@ -21,8 +18,7 @@ void initialData(float *ip, const int size)
     return;
 }
 
-void sumMatrixOnHost(float *A, float *B, float *C, const int nx,
-                     const int ny)
+void sumMatrixOnHost(float *A, float *B, float *C, const int nx, const int ny)
 {
     float *ia = A;
     float *ib = B;
@@ -33,7 +29,6 @@ void sumMatrixOnHost(float *A, float *B, float *C, const int nx,
         for (int ix = 0; ix < nx; ix++)
         {
             ic[ix] = ia[ix] + ib[ix];
-
         }
 
         ia += nx;
@@ -44,11 +39,10 @@ void sumMatrixOnHost(float *A, float *B, float *C, const int nx,
     return;
 }
 
-
 void checkResult(float *hostRef, float *gpuRef, const int N)
 {
     double epsilon = 1.0E-8;
-    bool match = 1;
+    bool match     = 1;
 
     for (int i = 0; i < N; i++)
     {
@@ -67,11 +61,10 @@ void checkResult(float *hostRef, float *gpuRef, const int N)
 }
 
 // grid 2D block 1D
-__global__ void sumMatrixOnGPUMix(float *MatA, float *MatB, float *MatC, int nx,
-                                  int ny)
+__global__ void sumMatrixOnGPUMix(float *MatA, float *MatB, float *MatC, int nx, int ny)
 {
-    unsigned int ix = threadIdx.x + blockIdx.x * blockDim.x;
-    unsigned int iy = blockIdx.y;
+    unsigned int ix  = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned int iy  = blockIdx.y;
     unsigned int idx = iy * nx + ix;
 
     if (ix < nx && iy < ny)
@@ -93,16 +86,16 @@ int main(int argc, char **argv)
     int nx = 1 << 14;
     int ny = 1 << 14;
 
-    int nxy = nx * ny;
+    int nxy    = nx * ny;
     int nBytes = nxy * sizeof(float);
     printf("Matrix size: nx %d ny %d\n", nx, ny);
 
     // malloc host memory
     float *h_A, *h_B, *hostRef, *gpuRef;
-    h_A = (float *)malloc(nBytes);
-    h_B = (float *)malloc(nBytes);
+    h_A     = (float *)malloc(nBytes);
+    h_B     = (float *)malloc(nBytes);
     hostRef = (float *)malloc(nBytes);
-    gpuRef = (float *)malloc(nBytes);
+    gpuRef  = (float *)malloc(nBytes);
 
     // initialize data at host side
     double iStart = seconds();
@@ -139,9 +132,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPUMix<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPU2D <<<(%d,%d), (%d,%d)>>> elapsed %f sec\n", grid.x,
-           grid.y,
-           block.x, block.y, iElaps);
+    printf("sumMatrixOnGPU2D <<<(%d,%d), (%d,%d)>>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
     // check kernel error
     CHECK(cudaGetLastError());
 

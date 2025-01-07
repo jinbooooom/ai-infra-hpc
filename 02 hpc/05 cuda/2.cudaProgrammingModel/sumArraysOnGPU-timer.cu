@@ -3,6 +3,7 @@
 #include "../common/common.h"
 
 /*
+ * 代码清单 2-5 在主函数中用 CPU 计时器测量向量加法的核函数耗时
  * This example demonstrates a simple vector sum on the GPU and on the host.
  * sumArraysOnGPU splits the work of the vector sum across CUDA threads on the
  * GPU. Only a single thread block is used in this small case, for simplicity.
@@ -74,7 +75,7 @@ int main(int argc, char **argv)
     CHECK(cudaSetDevice(dev));
 
     // set up data size of vectors
-    int nElem = 1 << 24;
+    int nElem = 1 << 24; // 16MB
     printf("Vector size %d\n", nElem);
 
     // malloc host memory

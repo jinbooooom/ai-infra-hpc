@@ -1,6 +1,6 @@
-#include "../common/common.h"
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include "../common/common.h"
 
 /*
  * This example demonstrates a simple vector sum on the GPU and on the host.
@@ -30,7 +30,6 @@ void sumMatrixOnHost(float *A, float *B, float *C, const int nx, const int ny)
         for (int ix = 0; ix < nx; ix++)
         {
             ic[ix] = ia[ix] + ib[ix];
-
         }
 
         ia += nx;
@@ -50,7 +49,6 @@ void printMatrix(float *C, const int nx, const int ny)
         for (int ix = 0; ix < nx; ix++)
         {
             printf("%f ", ic[ix]);
-
         }
 
         ic += nx;
@@ -63,7 +61,7 @@ void printMatrix(float *C, const int nx, const int ny)
 void checkResult(float *hostRef, float *gpuRef, const int N)
 {
     double epsilon = 1.0E-8;
-    bool match = 1;
+    bool match     = 1;
 
     for (int i = 0; i < N; i++)
     {
@@ -82,11 +80,10 @@ void checkResult(float *hostRef, float *gpuRef, const int N)
 }
 
 // grid 2D block 2D
-__global__ void sumMatrixOnGPU2D(float *MatA, float *MatB, float *MatC, int nx,
-                                 int ny)
+__global__ void sumMatrixOnGPU2D(float *MatA, float *MatB, float *MatC, int nx, int ny)
 {
-    unsigned int ix = threadIdx.x + blockIdx.x * blockDim.x;
-    unsigned int iy = threadIdx.y + blockIdx.y * blockDim.y;
+    unsigned int ix  = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned int iy  = threadIdx.y + blockIdx.y * blockDim.y;
     unsigned int idx = iy * nx + ix;
 
     if (ix < nx && iy < ny)
@@ -94,33 +91,28 @@ __global__ void sumMatrixOnGPU2D(float *MatA, float *MatB, float *MatC, int nx,
 }
 
 // grid 1D block 1D
-__global__ void sumMatrixOnGPU1D(float *MatA, float *MatB, float *MatC, int nx,
-                                 int ny)
+__global__ void sumMatrixOnGPU1D(float *MatA, float *MatB, float *MatC, int nx, int ny)
 {
     unsigned int ix = threadIdx.x + blockIdx.x * blockDim.x;
 
-    if (ix < nx )
+    if (ix < nx)
         for (int iy = 0; iy < ny; iy++)
         {
-            int idx = iy * nx + ix;
+            int idx   = iy * nx + ix;
             MatC[idx] = MatA[idx] + MatB[idx];
         }
-
-
 }
 
 // grid 2D block 1D
-__global__ void sumMatrixOnGPUMix(float *MatA, float *MatB, float *MatC, int nx,
-                                  int ny)
+__global__ void sumMatrixOnGPUMix(float *MatA, float *MatB, float *MatC, int nx, int ny)
 {
-    unsigned int ix = threadIdx.x + blockIdx.x * blockDim.x;
-    unsigned int iy = blockIdx.y;
+    unsigned int ix  = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned int iy  = blockIdx.y;
     unsigned int idx = iy * nx + ix;
 
     if (ix < nx && iy < ny)
         MatC[idx] = MatA[idx] + MatB[idx];
 }
-
 
 int main(int argc, char **argv)
 {
@@ -137,21 +129,21 @@ int main(int argc, char **argv)
     int nx = 1 << 14;
     int ny = 1 << 14;
 
-    int nxy = nx * ny;
+    int nxy    = nx * ny;
     int nBytes = nxy * sizeof(float);
     printf("Matrix size: nx %d ny %d\n", nx, ny);
 
     // malloc host memory
     float *h_A, *h_B, *hostRef, *gpuRef;
-    h_A = (float *)malloc(nBytes);
-    h_B = (float *)malloc(nBytes);
+    h_A     = (float *)malloc(nBytes);
+    h_B     = (float *)malloc(nBytes);
     hostRef = (float *)malloc(nBytes);
-    gpuRef = (float *)malloc(nBytes);
+    gpuRef  = (float *)malloc(nBytes);
 
     // initialize data at host side
     double iStart = seconds();
-    initialData(h_A,  2.0f, nxy);
-    initialData(h_B,  0.5f, nxy);
+    initialData(h_A, 2.0f, nxy);
+    initialData(h_B, 0.5f, nxy);
     double iElaps = seconds() - iStart;
     printf("Matrix initialization elapsed %f sec\n", iElaps);
 
@@ -180,8 +172,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPU2D<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPU2D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPU2D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     // adjust block size
     block.x = 16;
@@ -192,8 +183,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPU2D<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPU2D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPU2D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     // adjust block size
     block.y = 16;
@@ -205,8 +195,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPU2D<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPU2D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPU2D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     block.y = 16;
     block.x = 16;
@@ -217,8 +206,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPU2D<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPU2D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPU2D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     block.y = 16;
     block.x = 64;
@@ -229,8 +217,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPU2D<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPU2D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPU2D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     block.y = 64;
     block.x = 16;
@@ -241,8 +228,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPU2D<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPU2D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPU2D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     block.x = 32;
     grid.x  = (nx + block.x - 1) / block.x;
@@ -253,8 +239,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPU1D<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPU1D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPU1D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     block.x = 64;
     grid.x  = (nx + block.x - 1) / block.x;
@@ -265,8 +250,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPU1D<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPU1D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPU1D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     block.x = 128;
     grid.x  = (nx + block.x - 1) / block.x;
@@ -277,8 +261,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPU1D<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPU1D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPU1D <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     // grid 2D and block 1D
     block.x = 32;
@@ -290,8 +273,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPUMix<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPUMix <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPUMix <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     block.x = 64;
     grid.x  = (nx + block.x - 1) / block.x;
@@ -302,8 +284,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPUMix<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPUMix <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPUMix <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     block.x = 128;
     grid.x  = (nx + block.x - 1) / block.x;
@@ -314,8 +295,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPUMix<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPUMix <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPUMix <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     block.x = 256;
     grid.x  = (nx + block.x - 1) / block.x;
@@ -326,8 +306,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPUMix<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPUMix <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPUMix <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     block.x = 512;
     grid.x  = (nx + block.x - 1) / block.x;
@@ -338,8 +317,7 @@ int main(int argc, char **argv)
     sumMatrixOnGPUMix<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPUMix <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n",
-           grid.x, grid.y, block.x, block.y, iElaps);
+    printf("sumMatrixOnGPUMix <<<  (%d,%d), (%d,%d)  >>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
 
     CHECK(cudaMemcpy(gpuRef, d_MatC, nBytes, cudaMemcpyDeviceToHost));
     checkResult(hostRef, gpuRef, nxy);

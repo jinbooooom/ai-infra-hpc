@@ -1,19 +1,16 @@
-#include "../common/common.h"
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include "../common/common.h"
 
 /*
- * This example demonstrates a simple vector sum on the GPU and on the host.
- * sumArraysOnGPU splits the work of the vector sum across CUDA threads on the
- * GPU. A 2D thread block and 2D grid are used. sumArraysOnHost sequentially
- * iterates through vector elements on the host.
+ * 使用 2 维 grid 和 2 维 block 对矩阵求和
  */
 
 void initialData(float *ip, const int size)
 {
     int i;
 
-    for(i = 0; i < size; i++)
+    for (i = 0; i < size; i++)
     {
         ip[i] = (float)(rand() & 0xFF) / 10.0f;
     }
@@ -21,8 +18,8 @@ void initialData(float *ip, const int size)
     return;
 }
 
-void sumMatrixOnHost(float *A, float *B, float *C, const int nx,
-                     const int ny)
+// A、B、C 是用一维数组去表示的二维矩阵
+void sumMatrixOnHost(float *A, float *B, float *C, const int nx, const int ny)
 {
     float *ia = A;
     float *ib = B;
@@ -33,7 +30,6 @@ void sumMatrixOnHost(float *A, float *B, float *C, const int nx,
         for (int ix = 0; ix < nx; ix++)
         {
             ic[ix] = ia[ix] + ib[ix];
-
         }
 
         ia += nx;
@@ -44,11 +40,10 @@ void sumMatrixOnHost(float *A, float *B, float *C, const int nx,
     return;
 }
 
-
 void checkResult(float *hostRef, float *gpuRef, const int N)
 {
     double epsilon = 1.0E-8;
-    bool match = 1;
+    bool match     = 1;
 
     for (int i = 0; i < N; i++)
     {
@@ -67,12 +62,11 @@ void checkResult(float *hostRef, float *gpuRef, const int N)
 }
 
 // grid 2D block 2D
-__global__ void sumMatrixOnGPU2D(float *MatA, float *MatB, float *MatC, int nx,
-                                 int ny)
+__global__ void sumMatrixOnGPU2D(float *MatA, float *MatB, float *MatC, int nx /*矩阵行*/, int ny /*矩阵行*/)
 {
-    unsigned int ix = threadIdx.x + blockIdx.x * blockDim.x;
-    unsigned int iy = threadIdx.y + blockIdx.y * blockDim.y;
-    unsigned int idx = iy * nx + ix;
+    unsigned int ix  = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned int iy  = threadIdx.y + blockIdx.y * blockDim.y;
+    unsigned int idx = iy * nx + ix;  //  线程（ix, iy）对应的矩阵中的数据
 
     if (ix < nx && iy < ny)
         MatC[idx] = MatA[idx] + MatB[idx];
@@ -90,19 +84,19 @@ int main(int argc, char **argv)
     CHECK(cudaSetDevice(dev));
 
     // set up data size of matrix
-    int nx = 1 << 14;
-    int ny = 1 << 14;
+    int nx = 1 << 14;  // 矩阵列
+    int ny = 1 << 14;  // 矩阵行
 
-    int nxy = nx * ny;
+    int nxy    = nx * ny;
     int nBytes = nxy * sizeof(float);
     printf("Matrix size: nx %d ny %d\n", nx, ny);
 
     // malloc host memory
     float *h_A, *h_B, *hostRef, *gpuRef;
-    h_A = (float *)malloc(nBytes);
-    h_B = (float *)malloc(nBytes);
+    h_A     = (float *)malloc(nBytes);
+    h_B     = (float *)malloc(nBytes);
     hostRef = (float *)malloc(nBytes);
-    gpuRef = (float *)malloc(nBytes);
+    gpuRef  = (float *)malloc(nBytes);
 
     // initialize data at host side
     double iStart = seconds();
@@ -133,16 +127,16 @@ int main(int argc, char **argv)
     // invoke kernel at host side
     int dimx = 32;
     int dimy = 32;
-    dim3 block(dimx, dimy);
-    dim3 grid((nx + block.x - 1) / block.x, (ny + block.y - 1) / block.y);
+    dim3 block(dimx, dimy);  // x 方向 dimx 个元素，y 方向 dimy 个元素，即 dimy 行 dimx 列
+    dim3 grid((nx + block.x - 1) / block.x, (ny + block.y - 1) / block.y);  // (512, 512)
+    // 注意 block.x * grid.x = 32 * 512 = 2 << 14， 即每一个线程都能对应上二维矩阵中的一个数据。
+    printf("gridDim(%d, %d, %d), blockDim(%d, %d, %d)\n", grid.x, grid.y, grid.z, block.x, block.y, block.z);
 
     iStart = seconds();
     sumMatrixOnGPU2D<<<grid, block>>>(d_MatA, d_MatB, d_MatC, nx, ny);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("sumMatrixOnGPU2D <<<(%d,%d), (%d,%d)>>> elapsed %f sec\n", grid.x,
-           grid.y,
-           block.x, block.y, iElaps);
+    printf("sumMatrixOnGPU2D <<<(%d,%d), (%d,%d)>>> elapsed %f sec\n", grid.x, grid.y, block.x, block.y, iElaps);
     // check kernel error
     CHECK(cudaGetLastError());
 
