@@ -1,6 +1,6 @@
 CU_APPS=checkDeviceInfor checkThreadIndex sumArraysOnGPU-timer \
         sumMatrixOnGPU-1D-grid-1D-block sumMatrixOnGPU-2D-grid-2D-block \
-        checkDimension defineGridBlock sumMatrixOnGPU-2D-grid-1D-block sumMatrixOnGPU
+        checkDimension sumMatrixOnGPU-2D-grid-1D-block sumMatrixOnGPU
 C_APPS=sumArraysOnHost
 
 # 定义默认的构建目录，并使用abspath函数确保其为绝对路径 
