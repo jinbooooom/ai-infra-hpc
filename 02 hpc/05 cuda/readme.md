@@ -632,4 +632,50 @@ cudaError_t cudaFreeHost(void *ptr)
 
 固定内存的释放和分配成本比可分页内存要高很多，但是传输速度更快，所以对于大规模数据，固定内存效率更高。
 
+主要区别总结（deepseek 总结）：
+
+|     特性     | `cudaMallocHost`                     | `cudaMalloc`                               |
+| :----------: | ------------------------------------ | ------------------------------------------ |
+| **内存位置** | 主机端（CPU）                        | 设备端（GPU）                              |
+| **内存类型** | 页锁定内存（Pinned Memory）          | 设备内存（Device Memory）                  |
+|   **用途**   | 用于主机与设备之间的高效数据传输     | 用于在 GPU 上存储和处理数据                |
+| **访问方式** | 主机代码可以直接访问                 | 只能通过 CUDA 内核函数或 `cudaMemcpy` 访问 |
+|   **性能**   | 数据传输速度快，但分配和释放开销较大 | 分配和释放开销较小，但显存容量有限         |
+| **释放函数** | `cudaFreeHost`                       | `cudaFree`                                 |
+
+### 零拷贝内存
+
+GPU线程可以直接访问零拷贝内存，这部分内存在主机内存里面，CUDA核函数使用零拷贝内存有以下几种情况：
+
+- 当设备内存不足的时候可以利用主机内存
+- 避免主机和设备之间的显式内存传输
+- 提高PCIe传输率
+
+零拷贝内存是固定内存，不可分页。可以通过以下函数创建零拷贝内存：
+
+```cpp
+cudaError_t cudaHostAlloc(void **ptr, size_t size, unsigned int flags);
+```
+
+**用途**：分配主机端的页锁定内存，并提供更多的控制选项。
+
+**特点**：除了分配页锁定内存外，还可以通过 `flags` 参数指定内存的属性，例如：
+
+- `cudaHostAllocDefault`：默认行为，与 `cudaMallocHost` 相同。即 cudaMallocHost 是 cudaHostAlloc 中的一个默认的行为。
+- `cudaHostAllocPortable`：分配的内存可以被所有 CUDA 上下文使用。
+- `cudaHostAllocMapped`：分配的内存可以映射到设备地址空间，从而可以直接从 GPU 访问。
+- `cudaHostAllocWriteCombined`：分配写合并内存，适合主机写、设备读的场景。
+
+- 提供了更灵活的内存分配方式，适合需要特殊内存属性的场景。
+
+注意，零拷贝内存虽然不需要显式的传递到设备上，但是设备还不能通过pHost直接访问对应的内存地址，设备需要访问主机上的零拷贝内存，需要先获得一个地址，这个地址帮助设备访问到主机对应的内存，函数是：
+
+```cpp
+cudaError_t cudaHostGetDevicePointer(void ** pDevice,void * pHost,unsigned flags);
+```
+
+pDevice就是设备上访问主机零拷贝内存的指针了。此处flag必须设置为0，具体内容后面有介绍。
+
+零拷贝内存可以当做比设备主存储器更慢的一个设备。频繁的读写，零拷贝内存效率极低，因为每次都要经过PCIe。
+
 ## 流和并发
