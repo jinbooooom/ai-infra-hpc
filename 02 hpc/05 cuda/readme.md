@@ -678,4 +678,79 @@ pDevice就是设备上访问主机零拷贝内存的指针了。此处flag必须
 
 零拷贝内存可以当做比设备主存储器更慢的一个设备。频繁的读写，零拷贝内存效率极低，因为每次都要经过PCIe。
 
+### 统一虚拟寻址（UVA）
+
+设备架构2.0以后(即Fermi 架构之后)，Nvida搞了一套称为统一虚拟寻址方式（`UVA，Unified Virtual Addressing`）的内存机制，这样，设备内存和主机内存被映射到同一虚拟内存地址中。如下图
+
+![4-5](assets/readme/4-5.png)
+
+UVA之前，我们要管理所有的设备和主机内存，尤其是他们的指针，零拷贝内存尤其麻烦。通过UVA，`cudaHostAlloc` 函数分配的固定主机内存具有相同的主机和设备地址，可以直接将返回的地址传递给核函数。
+关于零拷贝内存，可以知道以下几个方面：
+
+- 分配映射的固定主机内存
+- 使用CUDA运行时函数获取映射到固定内存的设备侧指针
+- 将设备指针传递给核函数
+
+有了UVA，可以不用上面的获得设备上访问零拷贝内存的函数了：
+
+```cpp
+cudaError_t cudaHostGetDevicePointer(void ** pDevice,void * pHost,unsigned flags);
+```
+
+UVA 的例子，此例子没有调用 cudaHostGetDevicePointer，核函数直接使用host侧零拷贝内存指针：
+
+```cpp
+  float *a_host,*b_host,*res_d;
+  CHECK(cudaHostAlloc((float**)&a_host,nByte,cudaHostAllocMapped));
+  CHECK(cudaHostAlloc((float**)&b_host,nByte,cudaHostAllocMapped));
+  CHECK(cudaMalloc((float**)&res_d,nByte));
+  res_from_gpu_h=(float*)malloc(nByte);
+
+  initialData(a_host,nElem);
+  initialData(b_host,nElem);
+
+  dim3 block(1024);
+  dim3 grid(nElem/block.x);
+  // 没有调用 cudaHostGetDevicePointer，核函数直接使用host侧零拷贝内存指针
+  sumArraysGPU<<<grid,block>>>(a_host,b_host,res_d); 
+```
+
+UVA代码主要就是差个获取指针，UVA可以直接使用主机端的地址。
+
+### 统一内存（UM）
+
+CUDA6.0 （**Kepler** 架构）的时候又来了个统一内存（UM，Unified Memory），注意不是统一虚拟寻址，提出的目的也是为了简化内存管理。
+
+***统一内存中创建一个托管内存池（CPU上有，GPU上也有），内存池中已分配的空间可以通过相同的指针直接被CPU和GPU访问，底层系统在统一的内存空间中自动的进行设备和主机间的传输**。*数据传输对应用是不感知的，大大简化了代码。
+
+就是搞个内存池，这部分内存用一个指针同时表示主机和设备内存地址，依赖于UVA但是与UVA是完全不同的技术。
+
+统一内存提供了一个“指针到数据”的编程模型，概念上类似于零拷贝，但是零拷贝内存的分配是在主机上完成的，而且需要互相传输，但是统一寻址不同。
+
+托管内存是指底层系统自动分配的统一内存，未托管内存就是我们自己分配的内存，这时候对于核函数，可以传递给他两种类型的内存，已托管和未托管内存，可以同时传递。
+托管内存可以是静态的，也可以是动态的，添加 **managed** 关键字修饰托管内存变量。静态声明的托管内存作用域是文件，这一点可以注意一下。
+托管内存分配方式：
+
+```cpp
+cudaError_t cudaMallocManaged(void ** devPtr,size_t size,unsigned int flags=0)
+```
+
+这个函数和前面函数结构一致，注意函数名就好了，参数就不解释了，很明显了已经。
+CUDA6.0中设备代码不能调用cudaMallocManaged，只能主机调用，所有托管内存必须在主机代码上动态声明，或者全局静态声明
+
+#### UM 与 UVA 的区别
+
+**统一内存寻址（Unified Memory, UM）** 和 **统一虚拟地址（Unified Virtual Addressing, UVA）** 是 CUDA 编程中两个相关但不同的概念。它们都旨在简化主机（CPU）和设备（GPU）之间的内存管理，但实现方式和用途有所不同。以下是它们的详细区别（deepseek 整理）：
+
+|     特性     |                  统一内存（Unified Memory）                  |          统一虚拟寻址（Unified Virtual Addressing）          |
+| :----------: | :----------------------------------------------------------: | :----------------------------------------------------------: |
+|   **描述**   | 统一内存是一种内存管理模型，允许主机和设备共享同一个虚拟地址空间。 | UVA 是一种地址空间管理技术，它将主机内存和设备内存映射到同一个虚拟地址空间中。 |
+| **内存管理** |               自动管理主机和设备之间的数据迁移               |                     需要显式管理数据拷贝                     |
+| **地址空间** |                单一虚拟地址空间，数据按需迁移                |                 单一虚拟地址空间，但内存分离                 |
+| **数据拷贝** |                隐式（由 CUDA 运行时自动处理）                |                 显式（需使用 `cudaMemcpy`）                  |
+| **适用场景** |                 适合数据访问模式不固定的场景                 |                适合需要显式控制数据拷贝的场景                |
+| **支持版本** |   CUDA 6.0 及以上（计算能力 3.0 及以上，**Kepler** 架构）    |   CUDA 4.0 及以上（计算能力 2.0 及以上， **Fermi** 架构）    |
+
+
+
 ## 流和并发
