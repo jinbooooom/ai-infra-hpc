@@ -564,6 +564,48 @@ cudaError_t cudaMemcpyToSymbol(const void* symbol,const void *src,size_t count);
 
 每个SM也有一个只读常量缓存和只读纹理缓存，它们用于在设备内存中提高来自于各自内存空间内的读取性能。
 
+### 静态全局内存
+
+CPU内存有动态分配和静态分配两种类型，从内存位置来说，动态分配在堆上进行，静态分配在站上进行，在代码上的表现是一个需要new，malloc等类似的函数动态分配空间，并用delete和free来释放。在CUDA中也有类似的动态静态之分，我们前面用的都是要cudaMalloc的，所以对比来说就是动态分配，我们今天来个静态分配的，不过与动态分配相同是，也需要显式的将内存copy到设备端，代码如下:
+
+```cpp
+#include <cuda_runtime.h>
+#include <stdio.h>
+__device__ float devData;
+__global__ void checkGlobalVariable()
+{
+    printf("Device: The value of the global variable is %f\n",devData);
+    devData+=2.0;
+}
+int main()
+{
+    float value=3.14f;
+    cudaMemcpyToSymbol(devData,&value,sizeof(float));
+    printf("Host: copy %f to the global variable\n",value);                 // 3.14
+    checkGlobalVariable<<<1,1>>>();
+    cudaMemcpyFromSymbol(&value,devData,sizeof(float));
+    printf("Host: the value changed by the kernel to %f \n",value);   // 5.14
+    cudaDeviceReset();
+    return EXIT_SUCCESS;
+}
+```
+
+需要注意：
+
+1. 在主机端，devData只是一个标识符，不是设备全局内存的变量地址
+
+2. 在核函数中，devData就是一个全局内存中的变量。
+
+   主机代码不能直接访问设备变量，设备也不能访问主机变量，这就是CUDA编程与CPU多核最大的不同之处.。
+
+`cudaMemcpy(&value,devData,sizeof(float));`是不可以的！这个函数是无效的！不能用动态copy的方法给静态变量赋值。如果你死活都要用cudaMemcpy，只能用下面的方式：
+
+```cpp
+float *dptr=NULL;
+cudaGetSymbolAddress((void**)&dptr,devData);       // 获取 devData 对应的 dptr
+cudaMemcpy(dptr,&value,sizeof(float),cudaMemcpyHostToDevice);
+```
+
 ### 固定内存
 
 主机内存采用分页式管理，通俗的说法就是操作系统把物理内存分成一些“页”，然后给一个应用程序一大块内存，但是这一大块内存可能在一些不连续的页上，应用只能看到虚拟的内存地址，而操作系统可能随时更换物理地址的页（从原始地址复制到另一个地址）但是应用是不会差觉得，但是从主机传输到设备上的时候，如果此时发生了页面移动，对于传输操作来说是致命的，所以在数据传输之前，CUDA驱动会锁定页面，或者直接分配固定的主机内存，将主机源数据复制到固定内存上，然后从固定内存传输数据到设备上：
