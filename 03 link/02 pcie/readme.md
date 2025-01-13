@@ -1,6 +1,6 @@
 
 
-## CPU 访问 PCIe 设备的过程
+### CPU 访问 PCIe 设备的过程
 
 PCIe 设备的内存或寄存器通常会被映射到 CPU 的地址空间中（称为 **MMIO，Memory-Mapped I/O**）。当 CPU 通过指针访问这些地址（PCIe 设备的 MMIO 区域）时，会发出 Load/Store 指令，这些指令通过北桥路由到 PCIe 总线，最终由 PCIe 设备处理。这种机制使得 CPU 可以像访问内存一样访问 PCIe 设备的资源，简化了编程模型（CPU 可以高效地与 PCIe 设备进行数据交互，而无需额外的复杂协议）。
 
@@ -36,7 +36,7 @@ int value = *p;  // CPU 执行 Load 指令
 2. CPU 生成一个 PCIe 写请求，包含数据 `0x1234`，通过北桥发送到 PCIe 总线。
 3. PCIe 设备接收到写请求，将数据 `0x1234` 写入指定的寄存器或内存。
 
-## PCIe 带宽
+### PCIe 带宽
 
 **下表是单向带宽，一般指的是这个数据：**
 
@@ -76,3 +76,10 @@ PCIe（Peripheral Component Interconnect Express）带宽的计算涉及多个�
 
 **双向带宽**：PCIe是全双工的，因此总带宽是单向带宽的两倍。
 
+### PCIe 卡槽
+
+![image-20250113144746927](assets/readme/image-20250113144746927.png)
+
+## 参考
+
+- [PCIe 的饱和式学习](https://www.bilibili.com/video/BV12mpSeeEJx?spm_id_from=333.788.videopod.sections&vd_source=2d2ac911095577ab30d116171d315a7c)
