@@ -69,7 +69,7 @@ kernel_fun<<< grid, block >>>(prams...);
 
 彻底回答这个问题需要先了解下GPU中硬件和软件之间的对应关系，看下面的图表：
 
-<img src="assets/readme/image-20250107161056470.png" alt="image-20250107161056470" style="zoom: 80%;" />
+<img src="assets/readme/image-20250107161046770.png" alt="image-20250107161046770.png" style="zoom: 80%;" />
 
 ![img](assets/readme/v2-e0058ad79d5ebbae7a9658ab7d7d84bb_720w.webp)
 
