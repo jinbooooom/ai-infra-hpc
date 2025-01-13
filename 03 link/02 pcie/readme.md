@@ -36,3 +36,43 @@ int value = *p;  // CPU 执行 Load 指令
 2. CPU 生成一个 PCIe 写请求，包含数据 `0x1234`，通过北桥发送到 PCIe 总线。
 3. PCIe 设备接收到写请求，将数据 `0x1234` 写入指定的寄存器或内存。
 
+## PCIe 带宽
+
+**下表是单向带宽，一般指的是这个数据：**
+
+![image-20250113143136987](assets/readme/image-20250113143136987.png)
+
+**下表是双向带宽**![](assets/readme/image-20250113141646191.png)
+
+PCIe（Peripheral Component Interconnect Express）带宽的计算涉及多个因素，包括链路宽度、传输速率和编码方式。以下是详细的计算方法：
+
+- **链路宽度（Lane Width）**：PCIe链路由多个Lane组成，常见的宽度有x1、x4、x8、x16等。
+- **传输速率（Transfer Rate）**：PCIe有不同的版本，每个版本的传输速率不同：
+  - PCIe 1.0: 2.5 GT/s（Giga Transfers per second）
+  - PCIe 2.0: 5 GT/s
+  - PCIe 3.0: 8 GT/s
+  - PCIe 4.0: 16 GT/s
+  - PCIe 5.0: 32 GT/s
+  - PCIe 6.0: 64 GT/s
+- **编码方式（Encoding Scheme）**：PCIe使用8b/10b编码（PCIe 1.0和2.0）或128b/130b编码（PCIe 3.0及以上），这意味着每传输10位或130位数据中，只有8位或128位是有效数据。
+
+- 带宽（Bandwidth）可以通过以下公式计算：
+
+  - 对于PCIe 1.0和2.0（8b/10b编码）：
+
+    带宽=传输速率×链路宽度×8/10 / 8
+
+  - 对于PCIe 3.0及以上（128b/130b编码）：
+
+    带宽=传输速率×链路宽度×128/130 / 8
+
+**示例计算**：假设我们有一个PCIe 3.0 x16的设备：
+
+- 传输速率：8 GT/s
+- 链路宽度：16 Lane
+- 编码方式：128b/130b
+
+带宽=8 GT/s×16×128 / 130 / 8 ≈ 15.75GB/s
+
+**双向带宽**：PCIe是全双工的，因此总带宽是单向带宽的两倍。
+
