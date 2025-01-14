@@ -141,7 +141,7 @@ RoCE协议存在RoCEv1 （RoCE）和RoCEv2 （RRoCE）两个版本，主要区�
 
 ## SEND & RECV
 
-SEND & RECV 是双端操作，需要CPU的参与。
+**SEND & RECV 是双端操作，需要CPU的参与。**
 
 WR全称为Work Request，意为工作请求；WC全称Work Completion，意为工作完成。这两者其实是WQE和CQE在用户层的“映射”。因为APP是通过调用协议栈接口来完成RDMA通信的，WQE和CQE本身并不对用户可见，是驱动中的概念。用户真正通过API下发的是WR，收到的是WC。
 
@@ -192,7 +192,7 @@ RDMA是基于消息的传输协议，数据传输都是异步操作。 RDMA操�
 
 ### WRITE
 
-WRITE全称是RDMA WRITE操作，是本端主动写入远端内存的行为，除了准备阶段，远端CPU不需要参与，也不感知何时有数据写入、数据在何时接收完毕。所以这是一种单端操作。
+WRITE全称是RDMA WRITE操作，是本端主动写入远端内存的行为，**除了准备阶段，远端CPU不需要参与，也不感知何时有数据写入、数据在何时接收完毕**。所以这是一种单端操作。
 
 本端在准备阶段通过数据交互，获取了对端某一片可用的内存的地址和“钥匙”，相当于获得了这片远端内存的读写权限。拿到权限之后，本端就可以像访问自己的内存一样直接对这一远端内存区域进行读写，这也是RDMA——远程直接地址访问的内涵所在。
 
@@ -585,9 +585,40 @@ RDMA 应用绑定的 CPU 核心，最好与 RDMA 网卡在同一个 NUMA 下
 - **硬件限制**：某些硬件可能对较大的 MTU 处理效率较低，或者需要额外的分片和重组操作。
 - **应用特性**：如果应用主要发送小数据包，较大的 MTU 可能导致资源浪费，反而降低性能。
 
-参考：
+### 减少地址翻译的性能开销
+
+RDMA的网卡（下文以RNIC指代）通过DMA来读写系统内存，由于DMA只能根据物理地址访问，**所以RNIC需要保存一份目标内存区域的虚拟内存到物理内存的映射表**，这个映射表被存储在RNIC的**Memory Translation Table（MTT）中**。同时，由于目前RDMA的访问大都基于Direct Cache Access，不支持page-fault，所以我们还需要保证**目标内存区域是被pagelock住以防止操作系统将这部分内存页换出**。
+
+总结一下就是，当我们使用RDMA来访问一块内存的时候，这部分内存首先要被pagelock，接着我们还需要把这块内存虚拟地址到逻辑地址的映射表发送给RNIC用于后续的访问查找，这个过程就叫Memory Registeration，这块被注册的内存就是**Memory Region**。同时我们注册内存的时候需要指定这块内存的访问权限，RNIC将这个访问权限信息存储在Memory Protection Tables（MPT）中用于用户请求时的权限验证。
+
+**MTT和MPT被存储在内存中，但是RNIC的SRAM中会进行缓存**。当RNIC接收到来自用户的READ/WRITE请求的时候，首先在`RNIC` `SRAM`的缓存中查找用户请求的目标地址对应的物理地址以及这块地址对应的访问权限，如果缓存命中了，就直接基于DMA进行操作，如果没有命中，就得通过PCIe发送请求，在内存的MTT和MPT中进行查找，**这带来了相当的额外开销，尤其是当你的应用场景需要大量的、细粒度的内存访问的时候，此时RNIC SRAM中的MTT/MPT命中缺失带来的影响可能是致命的。**
+
+![img](assets/rdma/v2-8a098861bd4581a3ab61273fb905ff10_1440w.jpg)
+
+Memory Region的注册是一个耗时的操作，但大部分情况下，我们都只需要在最开始的时候做一次或者多次。现在也有不需要注册MR基于on-demand paging的方式来访问的，比如AWS的EFA协议。
+
+前面我们提到，当待请求的数据地址在RNIC  SRAM中的MTT/MPT没有命中的时候，RNIC需要通过PCIe去在内存中的MTT和MPT进行查找，这是一个耗时的操作。尤其是当我们需要高扇出、细粒度(high fan-out、fine-grained)的数据访问时，这个开销会尤为的明显。现有针对这个问题的优化方式主要有两种：
+
+1.  Large Page(指比传统 4KB 页更大的内存页(如 2MB 或 1GB))：无论是MTT亦或者操作系统的`Page Table`，虚拟地址到物理地址的映射表项是Page粒度的，即一个Page对应一个MTT的表项（Entry）或者Page  Table的Entry（PTE）。使用Large Page可以有效的减少MTT的Size，进而使得RNIC中的MTT Cache命中率更高。
+2. 使用Contiguous Memory + PA-MR：新一代的CX网卡支持用户基于物理地址访问，为了避免维护一个繁重的Page Table，**我们可以通过Linux的CMA  API来申请一大块连续的物理内存。这样我们的MTT就只有一项，可以保证100%的Cache命中率**。但是这个本身有一些安全隐患，因为使用PA-MR会绕过访问权限验证，所以使用的时候要注意这点。
+
+### 建立多个QP来加速数据处理
+
+当我们创建了QP之后，系统是需要保存状态数据的，比如QP的metadata，拥塞控制状态等等，除去QP中的WQE、MTT、MPT，一个QP大约对应375B的状态数据。这在以前RNIC的SRAM比较小的时候会是一个比较重的存储负担，所以以前的RDMA工作会有QP Sharing的研究，就是不同的处理线程去共用QP来减少meta  data的存储压力，但是这会带来一定的性能的损失。现在新的RNIC的SRAM已经比较大了，Mellanox的CX4、CX5系列的网卡的SRAM大约2MB，所以现在新网卡上，大家还是比较少去关注QP带来的存储开销，除非你要创建几千个，几万个QP。
+
+其次，RNIC是包含多个Processing Unit(PU)的，同时由于QP内的请求处理是具有顺序的，且为了`避免cross-PU的同步`（多个PU处理同一个QP，就需要跨PU同步来保证请求的顺序性），一般而言我们认为一个QP对应一个PU来处理。**所以，可以在一个线程内建立多个QP来加速数据处理，避免RDMA程序性能瓶颈卡在PU的处理上**。
+
+一个QP对应一个PU，这是我们对RNIC执行方式的一个简单建模。这个模型下，我们需要通过多QP来充分发挥多PU并行处理的能力，同时也要关注我们的操作减少PU之间的同步，PU之间同步对于性能有着较大的伤害。
+
+【建立多个QP来加速数据处理】参考论文[Design Guidelines for High Performance RDMA Systems](https://www.usenix.org/system/files/conference/atc16/atc16_paper-kalia.pdf)  441 页：
+
+### 性能优化参考
 
 - [Tips and trick to optimize your RDMA code 笔记【译文】](https://zhuanlan.zhihu.com/p/627396953)，[原文地址](https://www.rdmamojo.com/2013/06/08/tips-and-tricks-to-optimize-your-rdma-code/)
+- https://zhuanlan.zhihu.com/p/522332998
+- [Design Guidelines for High Performance RDMA Systems](https://www.usenix.org/system/files/conference/atc16/atc16_paper-kalia.pdf) 
+
+
 
 # RDMA 环境
 
