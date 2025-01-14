@@ -147,7 +147,7 @@ Pascal 架构在 SM 内部作了进一步精简，整体思路是 SM 内部包�
 
 ![Pascal 帕斯卡架构 NVLink](assets/GPU/04History10.png)
 
-## Volta 架构
+## Volta 架构 (重大改进)
 
 2017 年英伟达提出 Volta 架构，GV100 GPU 有 21.1 亿个晶体管，使用 TSMC 12 nm 工艺。伏特架构做了以下创新：
 
