@@ -16,7 +16,7 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include "../../../utils/log/log.hpp"
+#include "log.hpp"
 
 int gNodeNum;  // 节点总数
 int gRank;     // 当前的节点
@@ -35,6 +35,8 @@ int fun(int x)
 
     return y;
 }
+
+std::string get_local_ip() {std::string ip; return ip;} // TODO 空实现，例子
 
 int main(int argc, char **argv)
 {
