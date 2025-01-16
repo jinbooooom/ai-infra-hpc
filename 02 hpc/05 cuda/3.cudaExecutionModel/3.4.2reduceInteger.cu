@@ -462,7 +462,7 @@ __global__ void reduceUnrollWarps(int *g_idata, int *g_odata, unsigned int n)
 int main(int argc, char **argv)
 {
     // set up device
-    int dev = 0;
+    int dev = getGPUId();
     cudaDeviceProp deviceProp;
     CHECK(cudaGetDeviceProperties(&deviceProp, dev));
     printf("%s starting reduction at ", argv[0]);

@@ -9,7 +9,7 @@ BUILDDIR ?= build
 override BUILDDIR := $(abspath $(BUILDDIR))
 
 # 默认目标
-all: dirs ${CU_APPS:%=${BUILDDIR}/%} ${C_APPS:%=${BUILDDIR}/%}
+all: dirs ${CU_K_APPS:%=${BUILDDIR}/%} ${C_APPS:%=${BUILDDIR}/%} 
 
 # 定义 NVCC 编译器和动态生成 NVCC_GENCODE
 NVCC ?= /usr/lib/nvidia-cuda-toolkit/bin/nvcc
@@ -37,7 +37,7 @@ endif
 # $(NVCC) $(NVCC_GENCODE) -O2 -std=c++14 -dc -o $@ $< -lcudadevrt --relocatable-device-code true
 # CUDA 应用程序的编译规则
 ${BUILDDIR}/%: %.cu
-	$(NVCC) -O2 -std=c++14 -o $@ $<
+	$(NVCC) $(NVCC_GENCODE) -O2 -std=c++14 -dc -o $@ $< -lcudadevrt --relocatable-device-code true
 
 # C 应用程序的编译规则
 ${BUILDDIR}/%: %.cpp

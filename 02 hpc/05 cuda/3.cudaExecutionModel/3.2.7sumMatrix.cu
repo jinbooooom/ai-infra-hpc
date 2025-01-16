@@ -73,7 +73,7 @@ __global__ void sumMatrixOnGPU2D(float *A, float *B, float *C, int NX, int NY)
 int main(int argc, char **argv)
 {
     // set up device
-    int dev = 0;
+    int dev = getGPUId();
     cudaDeviceProp deviceProp;
     CHECK(cudaGetDeviceProperties(&deviceProp, dev));
     CHECK(cudaSetDevice(dev));
@@ -136,7 +136,7 @@ int main(int argc, char **argv)
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
     printf("sumMatrixOnGPU2D <<<(%d,%d), (%d,%d)>>> elapsed %lu ms\n", grid.x, grid.y, block.x, block.y, iElaps);
-    CHECK(cudaGetLastError());
+    CHECK(cudaGetLastError()); 
 
     // copy kernel result back to host side
     CHECK(cudaMemcpy(gpuRef, d_MatC, nBytes, cudaMemcpyDeviceToHost));

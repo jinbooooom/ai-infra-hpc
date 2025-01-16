@@ -37,9 +37,7 @@ GPUDirect Storage 的主要特点和优势包括：
 
 ![v2-6a4c295f35cd1ff89030b16aa4f686e6_b](assets/readme/v2-6a4c295f35cd1ff89030b16aa4f686e6_b.gif)
 
-有了 GPUDirect P2P 通信技术后，将数据从源 GPU 复制到同一节点中的另一个 GPU 不再需要将数据临时暂存到主机内存
-
-中。如果两个 GPU 连接到同一 PCIe 总线，GPUDirect P2P 允许访问其相应的内存，而无需 CPU 参与。前者将执行相同任务所需的复制操作数量减半。
+有了 GPUDirect P2P 通信技术后，将数据从源 GPU 复制到同一节点中的另一个 GPU 不再需要将数据临时暂存到主机内存中。如果两个 GPU 连接到同一 PCIe 总线，GPUDirect P2P 允许访问其相应的内存，而无需 CPU 参与。前者将执行相同任务所需的复制操作数量减半。
 
 ![v2-a6bccf8e702aaf51d320d747c74c13dc_b](assets/readme/v2-a6bccf8e702aaf51d320d747c74c13dc_b.gif)
 

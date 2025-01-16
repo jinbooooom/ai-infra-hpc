@@ -3,14 +3,34 @@
 #include "../common/common.h"
 
 /*
- * 获取当前 CUDA 平台上第一个设备的基本信息，
+ * 获取当前 CUDA 平台上指定 GPU 的基本信息，
  * 包括流多处理器（SM）的数量、常量内存的字节数、
  * 每个块的共享内存字节数等。
  */
 
 int main(int argc, char *argv[])
 {
-    int iDev = 0;
+    int iDev = getGPUId();
+
+    // 检查是否提供了设备编号
+    if (argc < 2)
+    {
+        printf("Usage default GPU0\n");
+    }
+    else
+    {  // 从命令行参数获取设备编号
+        iDev = atoi(argv[1]);
+    }
+
+    // 检查设备编号是否有效
+    int deviceCount;
+    CHECK(cudaGetDeviceCount(&deviceCount));
+    if (iDev < 0 || iDev >= deviceCount)
+    {
+        printf("Error: Invalid device ID. Available devices: 0 to %d\n", deviceCount - 1);
+        return EXIT_FAILURE;
+    }
+
     cudaDeviceProp iProp;
     CHECK(cudaGetDeviceProperties(&iProp, iDev));
 

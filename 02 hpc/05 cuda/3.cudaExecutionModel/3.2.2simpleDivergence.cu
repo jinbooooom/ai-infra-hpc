@@ -36,7 +36,7 @@ __global__ void mathKernel2(float *c)
     // 偶数编号的线程束执行if子句，奇数编号的线程束执行else子句，这样，同一个线程束里的线程一定执行相同的分支
     if ((tid / warpSize) % 2 == 0)
     {
-        ia = 100.0f;
+        ia = 100.0f; 
     }
     else
     {
@@ -109,7 +109,7 @@ __global__ void warmingup(float *c)
 int main(int argc, char **argv)
 {
     // set up device
-    int dev = 0;
+    int dev = getGPUId();
     cudaDeviceProp deviceProp;
     CHECK(cudaGetDeviceProperties(&deviceProp, dev));
     printf("%s using Device %d: %s\n", argv[0], dev, deviceProp.name);
@@ -137,13 +137,13 @@ int main(int argc, char **argv)
     CHECK(cudaMalloc((float **)&d_C, nBytes));
 
     // run a warmup kernel to remove overhead
-    size_t iStart, iElaps;
+    double iStart, iElaps;
     CHECK(cudaDeviceSynchronize());
     iStart = seconds();
     warmingup<<<grid, block>>>(d_C);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("warmup      <<< %4d %4d >>> elapsed %lu sec \n", grid.x, block.x, iElaps);
+    printf("warmup      <<< %4d %4d >>> elapsed %lf sec \n", grid.x, block.x, iElaps);
     CHECK(cudaGetLastError());
 
     // run kernel 1
@@ -151,7 +151,7 @@ int main(int argc, char **argv)
     mathKernel1<<<grid, block>>>(d_C);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("mathKernel1 <<< %4d %4d >>> elapsed %lu sec \n", grid.x, block.x, iElaps);
+    printf("mathKernel1 <<< %4d %4d >>> elapsed %lf sec \n", grid.x, block.x, iElaps);
     CHECK(cudaGetLastError());
 
     // run kernel 3
@@ -159,7 +159,7 @@ int main(int argc, char **argv)
     mathKernel2<<<grid, block>>>(d_C);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("mathKernel2 <<< %4d %4d >>> elapsed %lu sec \n", grid.x, block.x, iElaps);
+    printf("mathKernel2 <<< %4d %4d >>> elapsed %lf sec \n", grid.x, block.x, iElaps);
     CHECK(cudaGetLastError());
 
     // run kernel 3
@@ -167,7 +167,7 @@ int main(int argc, char **argv)
     mathKernel3<<<grid, block>>>(d_C);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("mathKernel3 <<< %4d %4d >>> elapsed %lu sec \n", grid.x, block.x, iElaps);
+    printf("mathKernel3 <<< %4d %4d >>> elapsed %lf sec \n", grid.x, block.x, iElaps);
     CHECK(cudaGetLastError());
 
     // run kernel 4
@@ -175,7 +175,7 @@ int main(int argc, char **argv)
     mathKernel4<<<grid, block>>>(d_C);
     CHECK(cudaDeviceSynchronize());
     iElaps = seconds() - iStart;
-    printf("mathKernel4 <<< %4d %4d >>> elapsed %lu sec \n", grid.x, block.x, iElaps);
+    printf("mathKernel4 <<< %4d %4d >>> elapsed %lf sec \n", grid.x, block.x, iElaps);
     CHECK(cudaGetLastError());
 
     // free gpu memory and reset divece
