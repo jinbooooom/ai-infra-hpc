@@ -1,7 +1,4 @@
 # AI-Infra HPC 学习与总结
-[![Stargazers repo roster for @jinbooooom/ai-infra-hpc](https://reporoster.com/stars/jinbooooom/ai-infra-hpc)](https://github.com/jinbooooom/ai-infra-hpc/stargazers)
-[![Forkers repo roster for @jinbooooom/ai-infra-hpc](https://reporoster.com/forks/jinbooooom/ai-infra-hpc)](https://github.com/jinbooooom/ai-infra-hpc/network/members)
-
 ### 本仓库用于记录 AI-Infra 与 HPC 技术：
 
 - AI System 的底层技术
