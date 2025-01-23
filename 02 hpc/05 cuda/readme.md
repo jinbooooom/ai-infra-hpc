@@ -2,7 +2,7 @@
 
 # CUDA 编程
 
-## 计算机架构
+## 1.CUDA中的异构并行计算
 
 有多种不同的方法可以对计算机架构进行分类。一个广泛使用的分类方法是弗林分类法（Flynn’s Taxonomy），它根据指令和数据进入CPU的方式，将计算机架构分为4种不同的类型（如图1-6所示）。
 
@@ -20,7 +20,7 @@
 
 GPU代表了一种众核架构，几乎包括了前文描述的所有并行结构：多线程、MIMD（多指令多数据）、SIMD（单指令多数据），以及指令级并行。NVIDIA公司称这种架构为SIMT（单指令多线程）。
 
-#### GPU核心和CPU核心
+### GPU核心和CPU核心
 
 尽管可以使用多核和众核来区分CPU和GPU的架构，但这两种核心是完全不同的。
 
@@ -28,7 +28,133 @@ CPU核心比较重，用来处理非常复杂的控制逻辑，以优化串行�
 
 GPU核心较轻，用于优化具有简单控制逻辑的数据并行任务，注重并行程序的吞吐量。
 
-## cuda 编程模型
+### CUDA中的修饰符
+
+DeepSeek 总结
+
+####  `__global__`
+
+- **执行位置**: 在GPU上执行。
+
+- **调用方式**: 由CPU调用（主机代码），但可以在GPU上启动多个线程并行执行。
+
+- **返回值**: 必须返回 `void`。
+
+  ```cpp
+  __global__ void kernelFunction(int *array) {
+      int idx = threadIdx.x;
+      array[idx] = idx;
+  }
+  ```
+
+#### `__device__`
+
+- **执行位置**: 在GPU上执行。
+
+- **调用方式**: 只能由其他 `__device__` 或 `__global__` 函数调用。
+
+- **返回值**: 可以有返回值。
+
+  ```cpp
+  __device__ int deviceFunction(int a, int b) {
+      return a + b;
+  }
+  ```
+
+#### `__host__`
+
+- **执行位置**: 在CPU上执行。
+
+- **调用方式**: 由CPU调用。
+
+- **返回值**: 可以有返回值。
+
+  ```cpp
+  __host__ int hostFunction(int a, int b) {
+      return a + b;
+  }
+  ```
+
+#### `__host__ __device__`
+
+- **执行位置**: 可以在CPU或GPU上执行。
+
+- **调用方式**: 可以由CPU或GPU调用。
+
+- **返回值**: 可以有返回值。
+
+  ```cpp
+  __host__ __device__ int hostDeviceFunction(int a, int b) {
+      return a + b;
+  }
+  ```
+
+#### `__noinline__`
+
+- **作用**: 强制编译器不要内联该函数。
+
+  ```cpp
+  __device__ __noinline__ int noInlineFunction(int a, int b) {
+      return a + b;
+  }
+  ```
+
+#### `__forceinline__`
+
+- **作用**: 强制编译器内联该函数。
+
+  ```cpp
+  __device__ __forceinline__ int forceInlineFunction(int a, int b) {
+      return a + b;
+  }
+  ```
+
+#### `__constant__`
+
+- **作用**: 用于修饰常量内存中的变量。
+
+  ```cpp
+  __constant__ int constantArray[10];
+  ```
+
+#### `__shared__`
+
+- **作用**: 用于修饰共享内存中的变量。
+
+  ```cpp
+  __shared__ int sharedArray[10];
+  ```
+
+#### `__managed__`
+
+- **作用**: 用于修饰托管内存中的变量，可以在CPU和GPU之间共享。
+
+  ```cpp
+  __managed__ int managedArray[10];
+  ```
+
+#### `__restrict__`
+
+- **作用**: 用于指示指针是唯一的，帮助编译器优化。
+
+  ```cpp
+  __global__ void kernelFunction(int *__restrict__ array) {
+      int idx = threadIdx.x;
+      array[idx] = idx;
+  }
+  ```
+
+总结
+
+- `__global__`: GPU函数，由CPU调用。
+- `__device__`: GPU函数，由GPU调用。
+- `__host__`: CPU函数，由CPU调用。(**默认修饰符，这种行为与标准的 C/C++ 一致**)
+- `__host__ __device__`: 可在CPU或GPU上执行。
+- `__noinline__` 和 `__forceinline__`: 控制函数内联。
+- `__constant__`, `__shared__`, `__managed__`: 修饰特定内存空间。
+- `__restrict__`: 优化指针使用。
+
+## 3.CUDA 编程模型
 
 ### 异构架构
 
@@ -113,7 +239,7 @@ kernel_fun<<< grid, block >>>(prams...);
 - 不支持静态变量
 - 显示异步行为
 
-## cuda 执行模型
+## 2.CUDA 执行模型
 
 ### GPU架构概述
 
@@ -427,7 +553,7 @@ __global__ void mathKernel3(float *c)
   - 线程块的资源需求（如每个线程块使用的寄存器数量、共享内存大小）。
   - GPU 架构的限制（如每个 SM 支持的最大线程块数）。
 
-## 内存布局
+## 4.内存布局
 
 ### 内存模型
 
