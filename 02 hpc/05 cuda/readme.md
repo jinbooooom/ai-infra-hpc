@@ -127,7 +127,7 @@ DeepSeek 总结
 
 #### `__managed__`
 
-- **作用**: 用于修饰托管内存中的变量，可以在CPU和GPU之间共享。
+- **作用**: 用于修饰托管内存中的变量，可以在CPU和GPU之间共享。（参考[统一内存UM](#统一内存（UM）)）
 
   ```cpp
   __managed__ int managedArray[10];
@@ -697,6 +697,7 @@ cudaError_t cudaMemcpyToSymbol(const void* symbol,const void *src,size_t count);
 CPU内存有动态分配和静态分配两种类型，从内存位置来说，动态分配在堆上进行，静态分配在站上进行，在代码上的表现是一个需要new，malloc等类似的函数动态分配空间，并用delete和free来释放。在CUDA中也有类似的动态静态之分，我们前面用的都是要cudaMalloc的，所以对比来说就是动态分配，我们今天来个静态分配的，不过与动态分配相同是，也需要显式的将内存copy到设备端，代码如下:
 
 ```cpp
+// 4.1.2.9globalVariable.cu
 #include <cuda_runtime.h>
 #include <stdio.h>
 __device__ float devData;
@@ -736,7 +737,7 @@ cudaMemcpy(dptr,&value,sizeof(float),cudaMemcpyHostToDevice);
 
 ### 固定内存
 
-主机内存采用分页式管理，通俗的说法就是操作系统把物理内存分成一些“页”，然后给一个应用程序一大块内存，但是这一大块内存可能在一些不连续的页上，应用只能看到虚拟的内存地址，而操作系统可能随时更换物理地址的页（从原始地址复制到另一个地址）但是应用是不会差觉得，但是从主机传输到设备上的时候，如果此时发生了页面移动，对于传输操作来说是致命的，所以在数据传输之前，CUDA驱动会锁定页面，或者直接分配固定的主机内存，将主机源数据复制到固定内存上，然后从固定内存传输数据到设备上：
+主机内存采用分页式管理，通俗的说法就是操作系统把物理内存分成一些“页”，然后给一个应用程序一大块内存，但是这一大块内存可能在一些不连续的页上，应用只能看到虚拟的内存地址，而操作系统可能随时更换物理地址的页（从原始地址复制到另一个地址）但是应用是不会差觉得，但是从主机传输到设备上的时候，如果此时发生了页面移动，对于传输操作来说是致命的，所以在数据传输之前，CUDA驱动会锁定页面，或者直接分配固定的主机内存，将主机源数据复制到固定内存上，然后从固定内存传输数据到设备上：(参考代码4.2.3pinMemTransfer.cu)
 
 ![4-4](assets/readme/4-4.png)
 
@@ -789,7 +790,7 @@ cudaError_t cudaHostAlloc(void **ptr, size_t size, unsigned int flags);
 
 **特点**：除了分配页锁定内存外，还可以通过 `flags` 参数指定内存的属性，例如：
 
-- `cudaHostAllocDefault`：默认行为，与 `cudaMallocHost` 相同。即 cudaMallocHost 是 cudaHostAlloc 中的一个默认的行为。
+- `cudaHostAllocDefault`：默认行为，与 `cudaMallocHost` 相同。即 `cudaMallocHost` 是 `cudaHostAlloc` 中的一个默认的行为。
 - `cudaHostAllocPortable`：分配的内存可以被所有 CUDA 上下文使用。
 - `cudaHostAllocMapped`：分配的内存可以映射到设备地址空间，从而可以直接从 GPU 访问。
 - `cudaHostAllocWriteCombined`：分配写合并内存，适合主机写、设备读的场景。
@@ -864,7 +865,12 @@ cudaError_t cudaMallocManaged(void ** devPtr,size_t size,unsigned int flags=0)
 ```
 
 这个函数和前面函数结构一致，注意函数名就好了，参数就不解释了，很明显了已经。
-CUDA6.0中设备代码不能调用cudaMallocManaged，只能主机调用，所有托管内存必须在主机代码上动态声明，或者全局静态声明
+CUDA6.0中设备代码不能调用`cudaMallocManaged`，只能主机调用，所有托管内存必须在主机代码上动态声明，或者全局静态声明
+
+参考代码：
+
+- [未使用UM托管的例子4.5sumMatrixGPUManaged.cu](4.5sumMatrixGPUManaged.cu)
+- [使用UM托管的例子4.5sumMatrixGPUManual.cu](4.5sumMatrixGPUManual.cu)
 
 #### UM 与 UVA 的区别
 
@@ -879,6 +885,8 @@ CUDA6.0中设备代码不能调用cudaMallocManaged，只能主机调用，所�
 | **适用场景** |                 适合数据访问模式不固定的场景                 |                适合需要显式控制数据拷贝的场景                |
 | **支持版本** |   CUDA 6.0 及以上（计算能力 3.0 及以上，**Kepler** 架构）    |   CUDA 4.0 及以上（计算能力 2.0 及以上， **Fermi** 架构）    |
 
+### 内存访问模式
 
+#### 对齐与合并访问
 
 ## 流和并发
