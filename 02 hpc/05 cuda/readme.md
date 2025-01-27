@@ -1284,3 +1284,7 @@ cudaEventInterprocess
 
 参考代码 6.3.1simpleMultiAddDepth.cu 与 6.3.2simpleMultiAddBreadth.cu
 
+### 重叠GPU和CPU执行
+
+参考代码 6.4asyncAPI.cu
+

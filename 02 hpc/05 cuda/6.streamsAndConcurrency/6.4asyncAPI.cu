@@ -1,16 +1,17 @@
-#include "../common/common.h"
-#include <stdio.h>
 #include <cuda_runtime.h>
+#include <stdio.h>
+#include "../common/common.h"
 
 /*
- * An example of using CUDA events to control asynchronous work launched on the
- * GPU. In this example, asynchronous copies and an asynchronous kernel are
- * used. A CUDA event is used to determine when that work has completed.
+ * 本示例演示了如何使用 CUDA 事件来控制 GPU 上启动的异步任务。
+ * 在此示例中，使用了异步拷贝和异步 kernel。
+ * 通过 CUDA 事件来确定这些任务何时完成。
  */
 
+// Kernel 执行向量与标量的加法
 __global__ void kernel(float *g_data, float value)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx     = blockIdx.x * blockDim.x + threadIdx.x;
     g_data[idx] = g_data[idx] + value;
 }
 
@@ -28,6 +29,12 @@ int checkResult(float *data, const int n, const float x)
     return 1;
 }
 
+int doCPUWork()
+{
+    printf("do CPU work\n");
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     int devID = getGPUId();
@@ -36,8 +43,8 @@ int main(int argc, char *argv[])
     printf("> %s running on", argv[0]);
     printf(" CUDA device [%s]\n", deviceProps.name);
 
-    int num = 1 << 24;
-    int nbytes = num * sizeof(int);
+    int num     = 1 << 24;
+    int nbytes  = num * sizeof(int);
     float value = 10.0f;
 
     // allocate host memory
@@ -65,18 +72,23 @@ int main(int argc, char *argv[])
     CHECK(cudaEventRecord(stop));
 
     // have CPU do some work while waiting for stage 1 to finish
+    // GPU 的核函数与 CPU 的计算工作是并行的。
+    // 如果 CPU 先完成，则 CPU 不断询问 GPU kernel 的运行状态。
+    // 如果 CPU 耗时更多，则 cudaEventQuery 执行一次就结束了。
+    // 总之，重叠了 GPU 与 CPU 的执行。
+    doCPUWork();
     unsigned long int counter = 0;
 
-    while (cudaEventQuery(stop) == cudaErrorNotReady) {
+    while (cudaEventQuery(stop) == cudaErrorNotReady)
+    {
         counter++;
     }
 
     // print the cpu and gpu times
-    printf("CPU executed %lu iterations while waiting for GPU to finish\n",
-           counter);
+    printf("CPU executed %lu iterations while waiting for GPU to finish\n", counter);
 
     // check the output for correctness
-    bool bFinalResults = (bool) checkResult(h_a, num, value);
+    bool bFinalResults = (bool)checkResult(h_a, num, value);
 
     // release resources
     CHECK(cudaEventDestroy(stop));
