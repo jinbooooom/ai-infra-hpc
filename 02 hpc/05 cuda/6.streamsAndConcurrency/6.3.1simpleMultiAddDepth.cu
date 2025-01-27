@@ -1,19 +1,14 @@
-#include "../common/common.h"
-#include <stdio.h>
 #include <cuda_runtime.h>
+#include <stdio.h>
+#include "../common/common.h"
 
-/*
- * This example demonstrates overlapping computation and communication by
- * partitioning a data set and asynchronously launching the memory copies and
- * kernels for each subset. Launching all transfers and kernels for a given
- * subset in the same CUDA stream ensures that computation on the device is not
- * started until the necessary data has been transferred. However, because the
- * work of each subset is independent of all other subsets, the communication
- * and computation of different subsets will overlap.
+/**
+ * 本示例演示了通过分区数据集并异步启动每个子集的内存拷贝和 kernel 来实现计算与通信的重叠。
+ * 在同一个 CUDA 流中启动给定子集的所有传输和 kernel，可以确保在必要的数据传输完成之前，
+ * 设备上的计算不会开始。然而，由于每个子集的工作是相互独立的，因此不同子集的通信和计算将重叠。
  *
- * This example launches copies and kernels in depth-first order.
+ * 本示例以深度优先顺序（depth-first order）启动拷贝和 kernel。
  */
-
 
 #define NSTREAM 4
 #define BDIM 128
@@ -22,7 +17,7 @@ void initialData(float *ip, int size)
 {
     int i;
 
-    for(i = 0; i < size; i++)
+    for (i = 0; i < size; i++)
     {
         ip[i] = (float)(rand() & 0xFF) / 10.0f;
     }
@@ -50,7 +45,7 @@ __global__ void sumArrays(float *A, float *B, float *C, const int N)
 void checkResult(float *hostRef, float *gpuRef, const int N)
 {
     double epsilon = 1.0E-8;
-    bool match = 1;
+    bool match     = 1;
 
     for (int i = 0; i < N; i++)
     {
@@ -63,7 +58,8 @@ void checkResult(float *hostRef, float *gpuRef, const int N)
         }
     }
 
-    if (match) printf("Arrays match.\n\n");
+    if (match)
+        printf("Arrays match.\n\n");
 }
 
 int main(int argc, char **argv)
@@ -81,8 +77,9 @@ int main(int argc, char **argv)
     {
         if (deviceProp.concurrentKernels == 0)
         {
-            printf("> GPU does not support concurrent kernel execution (SM 3.5 "
-                    "or higher required)\n");
+            printf(
+                "> GPU does not support concurrent kernel execution (SM 3.5 "
+                "or higher required)\n");
             printf("> CUDA kernel runs will be serialized\n");
         }
         else
@@ -92,15 +89,15 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("> Compute Capability %d.%d hardware with %d multi-processors\n",
-           deviceProp.major, deviceProp.minor, deviceProp.multiProcessorCount);
+    printf("> Compute Capability %d.%d hardware with %d multi-processors\n", deviceProp.major, deviceProp.minor,
+           deviceProp.multiProcessorCount);
 
     // set up max connectioin
-    char * iname = (char *)"CUDA_DEVICE_MAX_CONNECTIONS";
-    setenv (iname, "1", 1);
-    char *ivalue =  getenv (iname);
-    printf ("> %s = %s\n", iname, ivalue);
-    printf ("> with streams = %d\n", NSTREAM);
+    char *iname = (char *)"CUDA_DEVICE_MAX_CONNECTIONS";
+    setenv(iname, "1", 1);
+    char *ivalue = getenv(iname);
+    printf("> %s = %s\n", iname, ivalue);
+    printf("> with streams = %d\n", NSTREAM);
 
     // set up data size of vectors
     int nElem = 1 << 18;
@@ -109,35 +106,34 @@ int main(int argc, char **argv)
 
     // malloc pinned host memory for async memcpy
     float *h_A, *h_B, *hostRef, *gpuRef;
-    CHECK(cudaHostAlloc((void**)&h_A, nBytes, cudaHostAllocDefault));
-    CHECK(cudaHostAlloc((void**)&h_B, nBytes, cudaHostAllocDefault));
-    CHECK(cudaHostAlloc((void**)&gpuRef, nBytes, cudaHostAllocDefault));
-    CHECK(cudaHostAlloc((void**)&hostRef, nBytes, cudaHostAllocDefault));
+    CHECK(cudaHostAlloc((void **)&h_A, nBytes, cudaHostAllocDefault));
+    CHECK(cudaHostAlloc((void **)&h_B, nBytes, cudaHostAllocDefault));
+    CHECK(cudaHostAlloc((void **)&gpuRef, nBytes, cudaHostAllocDefault));
+    CHECK(cudaHostAlloc((void **)&hostRef, nBytes, cudaHostAllocDefault));
 
     // initialize data at host side
     initialData(h_A, nElem);
     initialData(h_B, nElem);
     memset(hostRef, 0, nBytes);
-    memset(gpuRef,  0, nBytes);
+    memset(gpuRef, 0, nBytes);
 
     // add vector at host side for result checks
     sumArraysOnHost(h_A, h_B, hostRef, nElem);
 
     // malloc device global memory
     float *d_A, *d_B, *d_C;
-    CHECK(cudaMalloc((float**)&d_A, nBytes));
-    CHECK(cudaMalloc((float**)&d_B, nBytes));
-    CHECK(cudaMalloc((float**)&d_C, nBytes));
+    CHECK(cudaMalloc((float **)&d_A, nBytes));
+    CHECK(cudaMalloc((float **)&d_B, nBytes));
+    CHECK(cudaMalloc((float **)&d_C, nBytes));
 
     cudaEvent_t start, stop;
     CHECK(cudaEventCreate(&start));
     CHECK(cudaEventCreate(&stop));
 
     // invoke kernel at host side
-    dim3 block (BDIM);
-    dim3 grid  ((nElem + block.x - 1) / block.x);
-    printf("> grid (%d, %d) block (%d, %d)\n", grid.x, grid.y, block.x,
-            block.y);
+    dim3 block(BDIM);
+    dim3 grid((nElem + block.x - 1) / block.x);
+    printf("> grid (%d, %d) block (%d, %d)\n", grid.x, grid.y, block.x, block.y);
 
     // sequential operation
     CHECK(cudaEventRecord(start, 0));
@@ -165,19 +161,15 @@ int main(int argc, char **argv)
 
     printf("\n");
     printf("Measured timings (throughput):\n");
-    printf(" Memcpy host to device\t: %f ms (%f GB/s)\n",
-           memcpy_h2d_time, (nBytes * 1e-6) / memcpy_h2d_time);
-    printf(" Memcpy device to host\t: %f ms (%f GB/s)\n",
-           memcpy_d2h_time, (nBytes * 1e-6) / memcpy_d2h_time);
-    printf(" Kernel\t\t\t: %f ms (%f GB/s)\n",
-           kernel_time, (nBytes * 2e-6) / kernel_time);
-    printf(" Total\t\t\t: %f ms (%f GB/s)\n",
-           itotal, (nBytes * 2e-6) / itotal);
+    printf(" Memcpy host to device\t: %f ms (%f GB/s)\n", memcpy_h2d_time, (nBytes * 1e-6) / memcpy_h2d_time);
+    printf(" Memcpy device to host\t: %f ms (%f GB/s)\n", memcpy_d2h_time, (nBytes * 1e-6) / memcpy_d2h_time);
+    printf(" Kernel\t\t\t: %f ms (%f GB/s)\n", kernel_time, (nBytes * 2e-6) / kernel_time);
+    printf(" Total\t\t\t: %f ms (%f GB/s)\n", itotal, (nBytes * 2e-6) / itotal);
 
     // grid parallel operation
-    int iElem = nElem / NSTREAM;
+    int iElem     = nElem / NSTREAM;
     size_t iBytes = iElem * sizeof(float);
-    grid.x = (iElem + block.x - 1) / block.x;
+    grid.x        = (iElem + block.x - 1) / block.x;
 
     cudaStream_t stream[NSTREAM];
 
@@ -192,14 +184,10 @@ int main(int argc, char **argv)
     for (int i = 0; i < NSTREAM; ++i)
     {
         int ioffset = i * iElem;
-        CHECK(cudaMemcpyAsync(&d_A[ioffset], &h_A[ioffset], iBytes,
-                              cudaMemcpyHostToDevice, stream[i]));
-        CHECK(cudaMemcpyAsync(&d_B[ioffset], &h_B[ioffset], iBytes,
-                              cudaMemcpyHostToDevice, stream[i]));
-        sumArrays<<<grid, block, 0, stream[i]>>>(&d_A[ioffset], &d_B[ioffset],
-                &d_C[ioffset], iElem);
-        CHECK(cudaMemcpyAsync(&gpuRef[ioffset], &d_C[ioffset], iBytes,
-                              cudaMemcpyDeviceToHost, stream[i]));
+        CHECK(cudaMemcpyAsync(&d_A[ioffset], &h_A[ioffset], iBytes, cudaMemcpyHostToDevice, stream[i]));
+        CHECK(cudaMemcpyAsync(&d_B[ioffset], &h_B[ioffset], iBytes, cudaMemcpyHostToDevice, stream[i]));
+        sumArrays<<<grid, block, 0, stream[i]>>>(&d_A[ioffset], &d_B[ioffset], &d_C[ioffset], iElem);
+        CHECK(cudaMemcpyAsync(&gpuRef[ioffset], &d_C[ioffset], iBytes, cudaMemcpyDeviceToHost, stream[i]));
     }
 
     CHECK(cudaEventRecord(stop, 0));
@@ -209,10 +197,8 @@ int main(int argc, char **argv)
 
     printf("\n");
     printf("Actual results from overlapped data transfers:\n");
-    printf(" overlap with %d streams : %f ms (%f GB/s)\n", NSTREAM,
-           execution_time, (nBytes * 2e-6) / execution_time );
-    printf(" speedup                : %f \n",
-           ((itotal - execution_time) * 100.0f) / itotal);
+    printf(" overlap with %d streams : %f ms (%f GB/s)\n", NSTREAM, execution_time, (nBytes * 2e-6) / execution_time);
+    printf(" speedup                : %f \n", ((itotal - execution_time) * 100.0f) / itotal);
 
     // check kernel error
     CHECK(cudaGetLastError());
@@ -242,5 +228,5 @@ int main(int argc, char **argv)
     }
 
     CHECK(cudaDeviceReset());
-    return(0);
+    return (0);
 }

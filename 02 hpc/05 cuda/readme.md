@@ -1279,3 +1279,8 @@ cudaEventInterprocess
 
 - `cudaEventDisableTiming` 表示事件不用于计时，可以减少系统不必要的开支也能提升 `cudaStreamWaitEvent` 和`cudaEventQuery` 的效率。
 - `cudaEventInterprocess` 表明可能被用于进程之间的事件
+
+### 重叠内核执行与数据传输
+
+参考代码 6.3.1simpleMultiAddDepth.cu 与 6.3.2simpleMultiAddBreadth.cu
+
