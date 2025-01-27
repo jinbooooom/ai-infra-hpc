@@ -30,7 +30,7 @@ int checkResult(float *data, const int n, const float x)
 
 int main(int argc, char *argv[])
 {
-    int devID = 0;
+    int devID = getGPUId();
     cudaDeviceProp deviceProps;
     CHECK(cudaGetDeviceProperties(&deviceProps, devID));
     printf("> %s running on", argv[0]);

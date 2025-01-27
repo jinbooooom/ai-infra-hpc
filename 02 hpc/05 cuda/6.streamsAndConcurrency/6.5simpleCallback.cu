@@ -1,17 +1,22 @@
 #include "../common/common.h"
 #include <stdio.h>
 #include <cuda_runtime.h>
-#include <stdlib.h>
-#include <omp.h>
 
 /*
- * An example of using OpenMP to parallelize the creation of CUDA work in
- * multiple streams. This example using n_streams OpenMP threads to launch 4
- * kernels in each stream. Note the new pragma introduced, #pragma omp parallel.
+ * An example of using CUDA callbacks to trigger work on the host after the
+ * completion of asynchronous work on the device. In this example, n_streams
+ * CUDA streams are created and 4 kernels are launched asynchronously in each.
+ * Then, a callback is added at the completion of those asynchronous kernels
+ * that prints diagnostic information.
  */
 
-#define N 300000
+#define N 100000
 #define NSTREAM 4
+
+void CUDART_CB my_callback(cudaStream_t stream, cudaError_t status, void *data)
+{
+    printf("callback from stream %d\n", *((int *)data));
+}
 
 __global__ void kernel_1()
 {
@@ -56,28 +61,14 @@ __global__ void kernel_4()
 int main(int argc, char **argv)
 {
     int n_streams = NSTREAM;
-    int isize = 1;
-    int iblock = 1;
-    int bigcase = 0;
 
-    // get argument from command line
     if (argc > 1) n_streams = atoi(argv[1]);
 
-    if (argc > 2) bigcase = atoi(argv[2]);
-
-    float elapsed_time;
-
-    // set up max connectioin
-    char* iname = "CUDA_DEVICE_MAX_CONNECTIONS";
-    setenv (iname, "32", 1);
-    char *ivalue =  getenv (iname);
-    printf ("%s = %s\n", iname, ivalue);
-
-    int dev = 0;
+    int dev = getGPUId();
     cudaDeviceProp deviceProp;
     CHECK(cudaGetDeviceProperties(&deviceProp, dev));
-    printf("> Using Device %d: %s with num_streams=%d\n", dev, deviceProp.name,
-           n_streams);
+    printf("> %s Starting...\n", argv[0]);
+    printf("> Using Device %d: %s\n", dev, deviceProp.name);
     CHECK(cudaSetDevice(dev));
 
     // check if device support hyper-q
@@ -86,7 +77,7 @@ int main(int argc, char **argv)
         if (deviceProp.concurrentKernels == 0)
         {
             printf("> GPU does not support concurrent kernel execution (SM 3.5 "
-                    "or higher required)\n");
+                   "or higher required)\n");
             printf("> CUDA kernel runs will be serialized\n");
         }
         else
@@ -99,6 +90,13 @@ int main(int argc, char **argv)
     printf("> Compute Capability %d.%d hardware with %d multi-processors\n",
            deviceProp.major, deviceProp.minor, deviceProp.multiProcessorCount);
 
+    // set up max connectioin
+    char * iname = (char *)"CUDA_DEVICE_MAX_CONNECTIONS";
+    setenv (iname, "8", 1);
+    char *ivalue =  getenv (iname);
+    printf ("> %s = %s\n", iname, ivalue);
+    printf ("> with streams = %d\n", n_streams);
+
     // Allocate and initialize an array of stream handles
     cudaStream_t *streams = (cudaStream_t *) malloc(n_streams * sizeof(
                                 cudaStream_t));
@@ -108,43 +106,32 @@ int main(int argc, char **argv)
         CHECK(cudaStreamCreate(&(streams[i])));
     }
 
-    // run kernel with more threads
-    if (bigcase == 1)
+    dim3 block (1);
+    dim3 grid  (1);
+    cudaEvent_t start_event, stop_event;
+    CHECK(cudaEventCreate(&start_event));
+    CHECK(cudaEventCreate(&stop_event));
+
+    int stream_ids[n_streams];
+
+    CHECK(cudaEventRecord(start_event, 0));
+
+    for (int i = 0; i < n_streams; i++)
     {
-        iblock = 512;
-        isize = 1 << 12;
-    }
-
-    // set up execution configuration
-    dim3 block (iblock);
-    dim3 grid  (isize / iblock);
-    printf("> grid %d block %d\n", grid.x, block.x);
-
-    // creat events
-    cudaEvent_t start, stop;
-    CHECK(cudaEventCreate(&start));
-    CHECK(cudaEventCreate(&stop));
-
-    // record start event
-    CHECK(cudaEventRecord(start, 0));
-
-    // dispatch job with depth first ordering using OpenMP
-    omp_set_num_threads(n_streams);
-    #pragma omp parallel
-    {
-        int i = omp_get_thread_num();
+        stream_ids[i] = i;
         kernel_1<<<grid, block, 0, streams[i]>>>();
         kernel_2<<<grid, block, 0, streams[i]>>>();
         kernel_3<<<grid, block, 0, streams[i]>>>();
         kernel_4<<<grid, block, 0, streams[i]>>>();
+        CHECK(cudaStreamAddCallback(streams[i], my_callback,
+                    (void *)(stream_ids + i), 0));
     }
 
-    // record stop event
-    CHECK(cudaEventRecord(stop, 0));
-    CHECK(cudaEventSynchronize(stop));
+    CHECK(cudaEventRecord(stop_event, 0));
+    CHECK(cudaEventSynchronize(stop_event));
 
-    // calculate elapsed time
-    CHECK(cudaEventElapsedTime(&elapsed_time, start, stop));
+    float elapsed_time;
+    CHECK(cudaEventElapsedTime(&elapsed_time, start_event, stop_event));
     printf("Measured time for parallel execution = %.3fs\n",
            elapsed_time / 1000.0f);
 
@@ -156,11 +143,10 @@ int main(int argc, char **argv)
 
     free(streams);
 
-    // destroy events
-    CHECK(cudaEventDestroy(start));
-    CHECK(cudaEventDestroy(stop));
-
-    // reset device
+    /*
+     * cudaDeviceReset must be called before exiting in order for profiling and
+     * tracing tools such as Nsight and Visual Profiler to show complete traces.
+     */
     CHECK(cudaDeviceReset());
 
     return 0;

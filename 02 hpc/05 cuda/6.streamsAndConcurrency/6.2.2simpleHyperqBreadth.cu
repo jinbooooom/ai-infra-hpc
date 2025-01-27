@@ -1,15 +1,13 @@
-#include "../common/common.h"
-#include <stdio.h>
 #include <cuda_runtime.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include "../common/common.h"
 
 /*
- * This example demonstrates submitting work to a CUDA stream in breadth-first
- * order. Work submission in breadth-first order prevents false-dependencies
- * from reducing the parallelism of an application. kernel_1, kernel_2,
- * kernel_3, and kernel_4 simply implement identical, dummy computation.
- * Separate kernels are used to make the scheduling of these kernels simpler to
- * visualize in the Visual Profiler.
+ * 本示例演示了以广度优先顺序（breadth-first order）向 CUDA 流提交任务。
+ * 以广度优先顺序提交任务可以防止虚假依赖（false-dependencies）降低应用程序的并行性。
+ * kernel_1、kernel_2、kernel_3 和 kernel_4 实现了相同的虚拟计算逻辑。
+ * 使用独立的 kernel 是为了在 Visual Profiler 中更直观地观察这些 kernel 的调度情况。
  */
 
 #define N 300000
@@ -19,7 +17,7 @@ __global__ void kernel_1()
 {
     double sum = 0.0;
 
-    for(int i = 0; i < N; i++)
+    for (int i = 0; i < N; i++)
     {
         sum = sum + tan(0.1) * tan(0.1);
     }
@@ -29,7 +27,7 @@ __global__ void kernel_2()
 {
     double sum = 0.0;
 
-    for(int i = 0; i < N; i++)
+    for (int i = 0; i < N; i++)
     {
         sum = sum + tan(0.1) * tan(0.1);
     }
@@ -39,7 +37,7 @@ __global__ void kernel_3()
 {
     double sum = 0.0;
 
-    for(int i = 0; i < N; i++)
+    for (int i = 0; i < N; i++)
     {
         sum = sum + tan(0.1) * tan(0.1);
     }
@@ -49,7 +47,7 @@ __global__ void kernel_4()
 {
     double sum = 0.0;
 
-    for(int i = 0; i < N; i++)
+    for (int i = 0; i < N; i++)
     {
         sum = sum + tan(0.1) * tan(0.1);
     }
@@ -58,28 +56,29 @@ __global__ void kernel_4()
 int main(int argc, char **argv)
 {
     int n_streams = NSTREAM;
-    int isize = 1;
-    int iblock = 1;
-    int bigcase = 0;
+    int isize     = 1;
+    int iblock    = 1;
+    int bigcase   = 0;
 
     // get argument from command line
-    if (argc > 1) n_streams = atoi(argv[1]);
+    if (argc > 1)
+        n_streams = atoi(argv[1]);
 
-    if (argc > 2) bigcase = atoi(argv[2]);
+    if (argc > 2)
+        bigcase = atoi(argv[2]);
 
     float elapsed_time;
 
     // set up max connectioin
-    char * iname = "CUDA_DEVICE_MAX_CONNECTIONS";
-    setenv (iname, "32", 1);
-    char *ivalue =  getenv (iname);
-    printf ("%s = %s\n", iname, ivalue);
+    char *iname = (char *)"CUDA_DEVICE_MAX_CONNECTIONS";
+    setenv(iname, "32", 1);
+    char *ivalue = getenv(iname);
+    printf("%s = %s\n", iname, ivalue);
 
-    int dev = 0;
+    int dev = getGPUId();
     cudaDeviceProp deviceProp;
     CHECK(cudaGetDeviceProperties(&deviceProp, dev));
-    printf("> Using Device %d: %s with num_streams %d\n", dev, deviceProp.name,
-           n_streams);
+    printf("> Using Device %d: %s with num_streams %d\n", dev, deviceProp.name, n_streams);
     CHECK(cudaSetDevice(dev));
 
     // check if device support hyper-q
@@ -87,8 +86,9 @@ int main(int argc, char **argv)
     {
         if (deviceProp.concurrentKernels == 0)
         {
-            printf("> GPU does not support concurrent kernel execution (SM 3.5 "
-                    "or higher required)\n");
+            printf(
+                "> GPU does not support concurrent kernel execution (SM 3.5 "
+                "or higher required)\n");
             printf("> CUDA kernel runs will be serialized\n");
         }
         else
@@ -98,14 +98,13 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("> Compute Capability %d.%d hardware with %d multi-processors\n",
-           deviceProp.major, deviceProp.minor, deviceProp.multiProcessorCount);
+    printf("> Compute Capability %d.%d hardware with %d multi-processors\n", deviceProp.major, deviceProp.minor,
+           deviceProp.multiProcessorCount);
 
     // Allocate and initialize an array of stream handles
-    cudaStream_t *streams = (cudaStream_t *) malloc(n_streams * sizeof(
-                                cudaStream_t));
+    cudaStream_t *streams = (cudaStream_t *)malloc(n_streams * sizeof(cudaStream_t));
 
-    for (int i = 0 ; i < n_streams ; i++)
+    for (int i = 0; i < n_streams; i++)
     {
         CHECK(cudaStreamCreate(&(streams[i])));
     }
@@ -114,12 +113,12 @@ int main(int argc, char **argv)
     if (bigcase == 1)
     {
         iblock = 512;
-        isize = 1 << 12;
+        isize  = 1 << 12;
     }
 
     // set up execution configuration
-    dim3 block (iblock);
-    dim3 grid  (isize / iblock);
+    dim3 block(iblock);
+    dim3 grid(isize / iblock);
     printf("> grid %d block %d\n", grid.x, block.x);
 
     // creat events
@@ -131,6 +130,7 @@ int main(int argc, char **argv)
     CHECK(cudaEventRecord(start, 0));
 
     // dispatch job with breadth first ordering
+    // 采用广度优先顺序可以确保工作队列中相邻的任务来自于不同的流
     for (int i = 0; i < n_streams; i++)
         kernel_1<<<grid, block, 0, streams[i]>>>();
 
@@ -149,11 +149,10 @@ int main(int argc, char **argv)
 
     // calculate elapsed time
     CHECK(cudaEventElapsedTime(&elapsed_time, start, stop));
-    printf("Measured time for parallel execution = %.3fs\n",
-           elapsed_time / 1000.0f);
+    printf("Measured time for parallel execution = %.3lfus\n", elapsed_time * 1000.0);
 
     // release all stream
-    for (int i = 0 ; i < n_streams ; i++)
+    for (int i = 0; i < n_streams; i++)
     {
         CHECK(cudaStreamDestroy(streams[i]));
     }

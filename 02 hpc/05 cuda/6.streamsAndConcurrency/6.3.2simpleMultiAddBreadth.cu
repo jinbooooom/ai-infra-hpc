@@ -11,9 +11,8 @@
  * work of each subset is independent of all other subsets, the communication
  * and computation of different subsets will overlap.
  *
- * This example launches copies and kernels in depth-first order.
+ * This example launches copies and kernels in breadth-first order.
  */
-
 
 #define NSTREAM 4
 #define BDIM 128
@@ -70,7 +69,7 @@ int main(int argc, char **argv)
 {
     printf("> %s Starting...\n", argv[0]);
 
-    int dev = 0;
+    int dev = getGPUId();
     cudaDeviceProp deviceProp;
     CHECK(cudaGetDeviceProperties(&deviceProp, dev));
     printf("> Using Device %d: %s\n", dev, deviceProp.name);
@@ -96,7 +95,7 @@ int main(int argc, char **argv)
            deviceProp.major, deviceProp.minor, deviceProp.multiProcessorCount);
 
     // set up max connectioin
-    char * iname = "CUDA_DEVICE_MAX_CONNECTIONS";
+    char * iname = (char *)"CUDA_DEVICE_MAX_CONNECTIONS";
     setenv (iname, "1", 1);
     char *ivalue =  getenv (iname);
     printf ("> %s = %s\n", iname, ivalue);
@@ -188,7 +187,7 @@ int main(int argc, char **argv)
 
     CHECK(cudaEventRecord(start, 0));
 
-    // initiate all work on the device asynchronously in depth-first order
+    // initiate all asynchronous transfers to the device
     for (int i = 0; i < NSTREAM; ++i)
     {
         int ioffset = i * iElem;
@@ -196,8 +195,20 @@ int main(int argc, char **argv)
                               cudaMemcpyHostToDevice, stream[i]));
         CHECK(cudaMemcpyAsync(&d_B[ioffset], &h_B[ioffset], iBytes,
                               cudaMemcpyHostToDevice, stream[i]));
+    }
+
+    // launch a kernel in each stream
+    for (int i = 0; i < NSTREAM; ++i)
+    {
+        int ioffset = i * iElem;
         sumArrays<<<grid, block, 0, stream[i]>>>(&d_A[ioffset], &d_B[ioffset],
                 &d_C[ioffset], iElem);
+    }
+
+    // enqueue asynchronous transfers from the device
+    for (int i = 0; i < NSTREAM; ++i)
+    {
+        int ioffset = i * iElem;
         CHECK(cudaMemcpyAsync(&gpuRef[ioffset], &d_C[ioffset], iBytes,
                               cudaMemcpyDeviceToHost, stream[i]));
     }

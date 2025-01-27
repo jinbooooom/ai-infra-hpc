@@ -1,7 +1,7 @@
 # 定义 CUDA 和 C 应用程序
-CU_APPS=asyncAPI simpleCallback simpleHyperqBreadth simpleHyperqDependence \
-        simpleHyperqDepth simpleHyperqOpenmp simpleMultiAddBreadth \
-        simpleMultiAddDepth
+CU_APPS=6.4asyncAPI 6.5simpleCallback 6.2.2simpleHyperqBreadth 6.2.7simpleHyperqDependence \
+        6.2.1simpleHyperqDepth 6.2.3simpleHyperqOpenmp 6.3.2simpleMultiAddBreadth \
+        6.3.1simpleMultiAddDepth
 C_APPS=
 
 # 定义默认的构建目录，并使用 abspath 函数确保其为绝对路径
