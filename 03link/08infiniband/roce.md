@@ -83,6 +83,59 @@ root@bcloud-node6:/home/lynxi/mft-4.24.0-72-x86_64-deb#
 
 ![image-20230801100513439](assets/roce/image-20230801100513439.png)
 
+## RoCE编程
+
+RoCEv2和Infiniband的RDMA虽然都可以使用相同的verbs进行编程，但是RoCEv2一些细节还是有所不同：
+
+- 不需要子网管理员Subnet Mangaer
+- LID为0，需要使用GRH，gid_idx要大于等于0
+- RC QP中的alternate path（即ibv_qp_attr中的alt_ah_attr）不需要设置
+
+### RoCE编程中的常见错误
+
+#### Failed to change qp to rtr. Errno: Invalid argument.
+
+我遇到这个问题是因为当初没有使用gid。RoCEv2与Infiniband的不同之一就是RoCEv2底层是使用的传统Ethernet，用不到LID（LID是在IB子网中用到的一种数据，RoCE中LID恒为0）。在RoCE中，即使是一台主机上的两台虚拟机通信，也要用到gid，即is_global要为1.
+
+```cpp
+if (target_lid == 0)
+{
+    qp_attr.ah_attr.is_global = 1;
+    qp_attr.ah_attr.port_num = IB_PORT; /* Must */
+    qp_attr.ah_attr.grh.sgid_index = config_info.gid_idx;
+    memcpy(&qp_attr.ah_attr.grh.dgid, dgid, 16);
+    qp_attr.ah_attr.grh.hop_limit = 0xFF;
+    qp_attr.ah_attr.grh.flow_label = 0;
+    qp_attr.ah_attr.grh.traffic_class = 0;
+}
+```
+
+### Failed to change qp to rtr. Errno: Connection timeout
+
+这个问题是我解决了前一个问题后才新冒出来的，后来在网上查了很久的资料也没找到有效方法解决。其实这个问题的原因其实就是 `gid_index`没有设置对。
+
+首先得知道gid是啥，gid我把它看作是传统网络里的IP地址，在代码中是一个16个uint8_t的数组。RDMA设备的一个物理端口（port_num）其实对应不只一个gid，我们可以通过函数 `ibv_query_gid`获取到一个设备的某个端口上的第x个gid。
+
+然后得知道，一个设备不同gid分别支持哪些协议，例如一些博客中写的 `show_gids`指令：
+
+```bash
+$ show_gids
+DEV     PORT    INDEX   GID                                     IPv4            VER     DEV
+---     ----    -----   ---                                     ------------    ---     ---
+mlx5_4  1       0       fe80:0000:0000:0000:ee0d:9aff:fe2f:c21a                 v1      p1p1
+mlx5_4  1       1       fe80:0000:0000:0000:ee0d:9aff:fe2f:c21a                 v2      p1p1
+```
+
+其中的VER就是表明这个gid是可以用在RoCEv1还是RoCEv2上。
+
+然而show_gids指令是必须安装了OFED驱动才有的指令，我的Linux系统还没安装OFED驱动，因此也没有这个指令。后来我用了一种取巧的方法解决了此问题，那就是用 `ibv_send_bw`测试指令。（在我的环境里rping、ibv_send_bw测试都能跑通，ibv_rc_pingpong测试跑不了，后来查阅资料说pingpong测试只支持Infiniband）
+
+![img](assets/roce/v2-6cfdf1e15533c086604c053ee27eb2b6_1440w.jpg)
+
+如上图，可以看到在ib_send_bw中，服务器端（左）用的gid_index为2，客户端（右）用的gid_index为1，因此我在代码中也是硬编码地让服务器端使用gid_index=2，客户端使用gid_index=1，这样就解决了此问题。（使用RDMA verbs的话貌似程序可以自动选择正确的gid_index，在这里只用了VPI verbs）
+
+参考 [RDMA学习-如何在两台虚拟机之间使用Soft-RoCE进行编程实验](https://zhuanlan.zhihu.com/p/449803157?utm_id=0)
+
 ## 参考
 
 - [ROCE技术深度解析](https://www.bilibili.com/video/BV1GPaseFEwD?spm_id_from=333.788.recommend_more_video.0&vd_source=2d2ac911095577ab30d116171d315a7c)
