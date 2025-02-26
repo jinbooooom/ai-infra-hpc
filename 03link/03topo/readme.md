@@ -232,3 +232,61 @@ NVSwitch 中的交叉开关（XBAR），经过精心调整和优化，与 SHARP 
 控制器对下一代 Octal Small Formfactor Pluggable（OSFP）电缆的支持，提供了更高的数据传输速率和更低的信号衰减，适合长距离的高速通信，为未来的网络扩展提供了无限可能。
 
 新 NVLink 模块还扩展了遥测功能，使得系统管理员能够更精确地监控和优化网络性能，确保系统的稳定运行。而集成的前向纠错（FEC）技术，增强了数据传输的可靠性，尤其是在面对信号衰减或干扰时，能够保证数据的完整性和准确性。
+
+## 新华三类脑服务器PCIe拓扑结构说明
+
+### AI串行配置
+
+AI 场景下，更偏重于 GPU 和 GPU 之间的交互，Switch 串行配置的拓扑图如下，实际上，CPU 所在的主板叫做 Main Board，Switch 所在的单板叫做 Node Board，如下图也可以看到使用 Flex Cable连接的连接器一共有 10 个，使用 5 条 Cable 互联。
+
+其中 M1，M3，M5，M6 位于 Main Board 上；N1-N6 位于 Node Board 上；
+
+AI-Switch 串行配置的情况下五个 Flex Cable 的连接方式是：
+
+M1-N1；M3-N3；M5-N2；M6-N6；N4-N5。
+
+![image-20250226230659866](./assets/readme/image-20250226230659866.png)
+
+### AI并行配置
+
+AI 场景，Switch 并行配置和上面的串行相比较大的一个区别是 2 个 Switch 分别通过 1 个 Flex Cable连接到
+
+CPU1 上。
+
+AI-Switch 并行配置的情况下五个 Flex Cable 的连接的方式是：
+
+M1-N5；M3-N3；M5-N1；M6-N6；N2-N4。
+
+![image-20250226230554226](./assets/readme/image-20250226230554226.png)
+
+### HPC配置
+
+HPC 配置更加强调 CPU 和 GPU 共同参与运算，和 AI 配置较大的区别是 2 个 Switch 分别通过 1条 Flex
+
+Cable 分别连接到 2 个 CPU 上。
+
+HPC 配置的情况下五个 Flex Cable 的连接的方式是：
+
+M1-N1；M3-N3；M5-N5；M6-N6；N2-N4。
+
+![image-20250226230248062](./assets/readme/image-20250226230248062.png)
+
+### **三种拓扑对比选型**
+
+- AI串行侧重于计算卡间通信，计算卡之间通信不需要通过CPU延时低带宽性能好，但是PCIe Switch2上的计算卡需要CPU2共同参与运算以及访问CPU2上的内存延时高带宽性能差
+
+- HPC侧重于计算卡和CPU共同运算，计算卡和CPU间通信延时低带宽性能好，但是跨PCIe Switch的计算卡间通信需要通过2个CPU导致延时高且带宽性能差，通信带宽受限于CPU间UPI带宽
+
+- AI并行是AI串行和HPC配置的一个折中方案，跨PCIe Switch的计算卡间通信需要经过1个CPU，通信带宽不受限于CPU间UPI带宽，且PCIe Switch2上的计算卡需要CPU2共同参与运算以及访问CPU2上的内存减少了访问PCIe Switch1的步骤
+
+基于上述对比，选择AI并行是一个合适的选择。
+
+## 海康类脑服务器PCIe拓扑结构说明
+
+存在的问题：
+
+- 跨PCIe Switch的计算卡间通信需要通过2个CPU导致延时高且带宽性能差，且CPU间采用QPI连接，通信带宽受限于CPU间QPI带宽
+
+- 每个CPU下2个PCIe Switch，即使在同一个CPU下的计算卡间通信也有可能需要经过CPU，影响延时和带宽。
+
+![image-20250226230918219](./assets/readme/image-20250226230918219.png)
