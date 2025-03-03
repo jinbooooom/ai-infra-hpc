@@ -55,6 +55,62 @@ GPUDirect RDMA 它允许 GPU 直接访问 RDMA 网络设备中的数据，无需
 
 ![img](assets/readme/v2-da6ac66f0c2b99d7bc053f6bf42661ae_1440w.jpg)GPUDirect RDMA 通过绕过主机内存和 CPU，直接在 GPU 和 RDMA 网络设备之间进行数据传输，显著降低传输延迟，加快数据交换速度，并可以减轻  CPU 负载，释放 CPU 的计算能力。另外，GPUDirect RDMA 技术允许 GPU 直接访问 RDMA  网络设备中的数据，避免了数据在主机内存中的复制，提高了数据传输的带宽利用率。
 
+#### GPU上的RDMA操作
+
+在使用了GPU Direct RDMA的GPU中，网卡是怎么和GPU配合，实现将GPU的HBM的数据发送到远端的呢？
+
+**在引入InfiniBand GPUDirect Async(IBGDA)之前，是使用CPU上的代理线程来进行网络通信的。NCCL中也有类似的proxy thread和相应实现。**
+
+![image-20250303153817686](assets/readme/image-20250303153817686.png)
+
+Proxy-initiated  communication（https://developer.nvidia.com/blog/improving-network-performance-of-hpc-systems-using-nvidia-magnum-io-nvshmem-and-gpudirect-async/）
+
+此时流程是这样的：
+
+1. 应用程序启动一个CUDA kernel，在GPU内存中产生数据。
+2. kernel function通过往CPU memory中的proxy buffer写入数据的方式，通知CPU要进行网络操作。我们将这个通知称为work descriptor, 它包含源地址、目标地址、数据大小及其他必要的网络信息。
+3. CPU上的proxy thread收到worker descriptor，并发起相应的网络操作。CPU会更新host memory中的doorbell record (DBR) buffer。（This buffer is used in the recovery path in case the NIC  drops the write to its doorbell.  就是用来记录doorbell的信息，万一硬件来不及及时响应doorbell并把它丢掉，你还能从DBR buffer中恢复doorbell）
+4. CPU通过写入NIC的 doorbell (DB)通知NIC。DB是NIC硬件中的一个寄存器。
+5. NIC从WQ中读取work descriptor。
+6. NIC使用GPUDirect RDMA直接从GPU内存搬运数据。
+7. NIC将数据传输到远程节点。
+8. NIC通过向主机内存中的CQ写入事件来指示网络操作已完成。
+9. CPU轮询CQ以检测网络操作的完成。
+10. CPU通知GPU操作已完成。
+
+可以发现，这个过程竟然需要GPU, CPU, NIC三方参与。CPU就像是一个中转站，那么显然它有一些缺点：
+
+- proxy thread消耗了CPU cycles
+- proxy thread成为瓶颈，导致在细粒度传输（小消息）时无法达到NIC的峰值吞吐。现代NIC每秒可以处理数亿个通信请求。GPU可以按照该速率生成请求，但CPU的处理速率低得多，造成了在细粒度通信时的瓶颈。
+
+#### InfiniBand GPUDirect Async
+
+IBGDA 是基于 GPUDirect RDMA 技术进一步发展而来的。GPUDirect RDMA 提供了让 GPU  内存能够被直接访问的机制，而 IBGDA 在此基础上，直接在 GPU 内存中生成网络工作描述符（Work  Queue, WQ），并通过 GPUDirect RDMA 通知 InfiniBand 网卡执行数据传输，无需 CPU  干预。其工作队列（WQ）和门铃寄存器（DBR）缓冲区从主机内存迁移到 GPU 内存，减少了 GPU 与 CPU  间的数据复制开销。
+
+IBGDA 能够显著提升细粒度通信的吞吐量，尤其适用于处理每秒数亿级请求的现代 InfiniBand 网卡的场景，在分布式训练中的梯度同步等高频次、小数据量的节点间通信任务中表现出色。
+
+![image-20250303153852214](assets/readme/image-20250303153852214.png)
+
+IBGDA  (https://developer.nvidia.com/blog/improving-network-performance-of-hpc-systems-using-nvidia-magnum-io-nvshmem-and-gpudirect-async)
+
+1. CPU程序启动一个CUDA kernel function，在GPU内存中生成数据。
+2. 使用SM创建一个NIC work descriptor，并将其直接写入WQ。与CPU proxy thread不同，该WQ区位于GPU内存中。
+3. SM更新DBR buffer，它也位于GPU内存中。
+4. SM通过写入NIC的DB寄存器通知NIC。
+5. NIC使用GPUDirect RDMA从WQ读取工作描述符。
+6. NIC使用GPUDirect RDMA读取GPU内存中的数据。
+7. NIC将数据传输到远程节点。
+8. NIC通过使用GPUDirect RDMA向CQ缓冲区写入事件，通知GPU网络操作已完成。
+
+可见，IBGDA消除了CPU在通信控制路径中的作用。在使用IBGDA时，GPU和NIC直接交换进行通信所需的信息。WQ和DBR buffer也被移到GPU内存中，以提高SM访问效率。
+
+那么如何能使用上述功能呢？实际上NVIDIA OpenSHMEM Library (NVSHMEM)早已把IBGDA的能力加入进它的库中，并且NVSHMEM 为所有参与计算的 GPU  提供了一个统一的、对称的全局地址空间，方便用户的开发。DeepSeek开源的DeepEP也使用了NVSHMEM。
+
+参考：
+
+- [Improving Network Performance of HPC Systems Using NVIDIA Magnum IO NVSHMEM and GPUDirect Async](https://developer.nvidia.com/blog/improving-network-performance-of-hpc-systems-using-nvidia-magnum-io-nvshmem-and-gpudirect-async/)
+- [浅析DeepSeek中提到的IBGDA](https://zhuanlan.zhihu.com/p/26082845081)
+
 ## GDRCopy
 
 GDRCopy 是一个基于 GPUDirect RDMA 技术的低延迟 GPU 内存拷贝库，它允许 CPU 直接映射和访问 GPU  内存。GDRCopy 还提供了优化的拷贝 API，并被广泛应用于高性能通信运行时环境中，如 UCX、OpenMPI、MVAPICH 和  NVSHMEM。
