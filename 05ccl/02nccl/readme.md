@@ -38,7 +38,45 @@ LL128能够以较低的延迟达到较大的带宽率，NCCL会在带有NVLink�
 
 ![img](./assets/readme/v2-70a52241e2e43ffc825ab5d44f855a7e_1440w.jpg)
 
-# 算法分析
+# 算法
+
+### 算法原理与实现
+
+#### Broadcast Ring
+
+![LynCCL-Broadcast](./assets/readme/LynCCL-Broadcast.png)
+
+其中红色箭头为不是 in-place 场景下的行为。其实红色箭头的行为完全可以让 root 节点的sendbuff往自己节点的recvBuffer 拷贝，但某些国产芯片同芯片间的P2P比跨芯片间的P2P慢的多，因此就多了红色箭头的拷贝路径，这在GPU中是不存在的。
+
+#### Broadcast Tree
+
+![LCCL-broadcast-Tree](./assets/readme/LCCL-broadcast-Tree.png)
+
+#### AllGather Full Mesh
+
+#### AllGather Ring
+
+![LynCCL-AllGather-Ring](./assets/readme/LynCCL-AllGather-Ring.png)
+
+
+
+#### AllGather Bruck
+
+![LCCL-all_gather-bruck](./assets/readme/LCCL-all_gather-bruck.png)
+
+#### Reduce Tree
+
+![LynCCL-Reduce-Tree](./assets/readme/LynCCL-Reduce-Tree.png)
+
+#### ReduceScatter Ring
+
+![LynCCL-ReduceScatter-Ring](./assets/readme/LynCCL-ReduceScatter-Ring.png)
+
+#### AllReduce Ring
+
+![LynCCL-AllReduce-Ring](./assets/readme/LynCCL-AllReduce-Ring.png)
+
+### 算法耗时总结
 
 HCCL采用α–β模型（Hockney）进行性能评估，算法耗时计算用到的变量定义如下：
 
@@ -68,7 +106,7 @@ HCCL采用α–β模型（Hockney）进行性能评估，算法耗时计算用�
 | :--------------: | :--------------: | :----------------------------------------------------------: | ------------------------------------------------------------ |
 | `gather/scatter` |    Full Mesh     |                        (α + βn)(p-1)                         | 所有场景                                                     |
 |   `broadcast`    |       Ring       | (s+p-2)(β n/s+α) = (s+p-2)β n/s + (s+p-2) α，当 s >> n 时，约等于 βn + sα | 大数据                                                       |
-|                  |       RHD        |                    ceil(log2 p) (α + βn)                     | 节点数多，数据量少                                           |
+|                  |       Tree       |                    ceil(log2 p) (α + βn)                     | 节点数多，数据量少                                           |
 |   `AllGather`    |    Full Mesh     |                        (p-1) (α + βn)                        | 每一步间不存在依赖                                           |
 |                  |       Ring       |                        (p-1) (α + βn)                        | 每一步间存在依赖                                             |
 |                  |      Bruck       |                   ceil(log2 p) α + (p-1)βn                   | 每一步间存在依赖，节点数多，数据量少                         |
