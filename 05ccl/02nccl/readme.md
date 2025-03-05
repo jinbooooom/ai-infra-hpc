@@ -42,31 +42,44 @@ LL128能够以较低的延迟达到较大的带宽率，NCCL会在带有NVLink�
 
 HCCL采用α–β模型（Hockney）进行性能评估，算法耗时计算用到的变量定义如下：
 
-- α：节点间的固定时延。
+- α：每次通信的固定时延。
 
 - β：每byte数据传输耗时。
 
-- n：节点间通信的数据大小，单位为byte。
+- n：节点间通信的数据大小，单位为byte。这里指集合通信接口里的 sizeof(type) * count
+
+- N：节点间通信的数据总大小，单位为byte。一般指 AllGather\Gather里的 recvBuf 大小，即 p * sizeof(type) * count
 
 - γ：每byte数据规约计算耗时。
 
 - p：通信域节点个数，影响通信步数。
 
-  其中单步传输并规约计算n byte数据的耗时为： D = α + nβ + nγ。
+- s：切片的个数
 
-| 原语 | 算法 | 耗时 |
-| ---- | ---- | ---- |
-|      |      |      |
-|      |      |      |
-|      |      |      |
-|      |      |      |
-|      |      |      |
-|      |      |      |
-|      |      |      |
-|      |      |      |
-|      |      |      |
+  其中单步传输并规约计算n byte数据的耗时为： t = α + nβ + nγ。
+  
+  在计算耗时时，假设均为in-place操作。
+  
+  Recursive Havling-Doubling为递归二分和倍增算法
+  
+  SHM指利用本机的共享内存作传输的算法
 
-
+|       原语       |    算法/拓扑     |       耗时（有root节点的以root为准，假设都是in-place）       | 备注                                                         |
+| :--------------: | :--------------: | :----------------------------------------------------------: | ------------------------------------------------------------ |
+| `gather/scatter` |    Full Mesh     |                        (α + βn)(p-1)                         | 所有场景                                                     |
+|   `broadcast`    |       Ring       | (s+p-2)(β n/s+α) = (s+p-2)β n/s + (s+p-2) α，当 s >> n 时，约等于 βn + sα | 大数据                                                       |
+|                  |       RHD        |                    ceil(log2 p) (α + βn)                     | 节点数多，数据量少                                           |
+|   `AllGather`    |    Full Mesh     |                        (p-1) (α + βn)                        | 每一步间不存在依赖                                           |
+|                  |       Ring       |                        (p-1) (α + βn)                        | 每一步间存在依赖                                             |
+|                  |      Bruck       |                   ceil(log2 p) α + (p-1)βn                   | 每一步间存在依赖，节点数多，数据量少                         |
+|    `AllToAll`    |    Full Mesh     |                        (p-1) (α + βn)                        |                                                              |
+|     `Reduce`     |       Tree       |                        ceil(log2 p) t                        | 注意非root节点只有sendBuffer有数据，因此该算法内部要分配临时的buffer |
+|                  |       SHM        |                                                              |                                                              |
+| `RedduceScatter` |       Ring       |                           (p-1) t                            | 每一步间存在依赖                                             |
+|                  |       SHM        |                                                              |                                                              |
+|   `AllReduce`    | Reduce+Broadcast |                                                              |                                                              |
+|                  |       Ring       |    (p-1) (α + βn) + (p-1) t = 2 (p-1) (α + βn) + (p-1) nγ    |                                                              |
+|                  |   Double Tree    |                                                              |                                                              |
 
 
 
@@ -86,9 +99,9 @@ HCCL采用α–β模型（Hockney）进行性能评估，算法耗时计算用�
 
  **如何提高计算效率**？
 
-这件事情其实是一个case by case的事情。因为通信、计算速度啥的受硬件影响更多。而每一个集群的硬件拓扑都是不一样的。同样是[A100](https://zhida.zhihu.com/search?content_id=666647107&content_type=Answer&match_order=1&q=A100&zhida_source=entity)
+这件事情其实是一个case by case的事情。因为通信、计算速度啥的受硬件影响更多。而每一个集群的硬件拓扑都是不一样的。同样是A100
 
-集群，我全DGX节点，每一张A100都是[SXM接口](https://zhida.zhihu.com/search?content_id=666647107&content_type=Answer&match_order=1&q=SXM接口&zhida_source=entity)并配一块儿专属的[IB网卡](https://zhida.zhihu.com/search?content_id=666647107&content_type=Answer&match_order=1&q=IB网卡&zhida_source=entity)。你一个小破普惠服务器插8张PCI-E A100，IB卡一个节点只给一张。那咱俩遇到的问题就完全不是一个问题。
+集群，我全DGX节点，每一张A100都是SXM接口并配一块儿专属的IB网卡。你一个小破普惠服务器插8张PCI-E A100，IB卡一个节点只给一张。那咱俩遇到的问题就完全不是一个问题。
 
 **计算-通信重叠**
 
@@ -114,7 +127,7 @@ HCCL采用α–β模型（Hockney）进行性能评估，算法耗时计算用�
 
 实际上当你的训练超过2048个GPU日时，在整个训练过程当中发生单个GPU甚至单个节点下线是再正常不过的事情了。
 
-PyTorch在1.10就引入了[torchelastic](https://zhida.zhihu.com/search?content_id=666647107&content_type=Answer&match_order=1&q=torchelastic&zhida_source=entity)
+PyTorch在1.10就引入了torchelastic
 
 弹性训练机制，用过的都骂娘。等下，让我先骂一遍，呸。ok咱们继续吧。
 
