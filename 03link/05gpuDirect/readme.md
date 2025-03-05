@@ -121,12 +121,46 @@ GDRCopy 是一个基于 GPUDirect RDMA 技术的低延迟 GPU 内存拷贝库，
 
 ![magnum-io-gdrcopy-h2d-and-d2h](assets/readme/magnum-io-gdrcopy-h2d-and-d2h.svg)
 
+## NVSHMEM
+
+- NVSHMEM是基于OpenSHMEM的并行编程接口，为NVIDIA GPU集群提供高效且可扩展的通信
+- NVSHMEM为数据创建了一个全局地址空间，该空间跨越多个GPU内存，可以通过细粒度的GPU发起操作、CPU发起操作以及CUDA流上的操作进行访问
+- 将整个GPU集群看成一个有统一编址的内存，将整个GPU集群里面所有的内存看成一个内存
+
+![img](assets/readme/v2-50bd55c6233e74eb24914dcec2beb9c7_1440w.jpg)
+
+特性：
+
+- 将多个GPU的内存组合成一个分区的全局地址空间（PGAS模型Partitioned Global Address Space，分区全局地址空间），可通过NVSHMEM API访问
+- 包含一个低开销的内核通信API，供GPU线程使用
+- 包括基于流和CPU启动的通信API
+- 支持x86和Arm处理器
+- 可与MPI和其他OpenSHMEM实现互操作
+- NVSHMEM通过PGAS模型和GPU直接通信的机制，为多GPU多节点应用提供了高效的编程接口，尤其适合需要频繁跨设备数据交换的高性能计算场景，尽管需开发者管理内存一致性，但其性能优势和编程便捷性使其成为替代传统MPI的重要选择
+
+- NVSHMEM与CUDA同一级别
+
+![img](assets/readme/v2-4e85659da149d69721d9cb784461c29f_1440w.jpg)
+
+### NVSHMEM 和 NCCL
+
+![请添加图片描述](assets/readme/2478f948b5624c0b8574a74dd92a0c65.png)
+ **总体来说**，NVSHMEM较轻量级，适合小规模的不规则复杂通信；NCCL较重量级，适合大规模的规则通信。
+
+![img](assets/readme/lQLPJwYNoIybdPPNAuvNApuwfzm-8avokhIHqciCxk2UAA_667_747.png)
+
+代码是DeepSeek写的使用 NVSHMEM API 实现的 gather sample。
+
+从代码上看，感觉 NVSHMEM 像 GPU 版本的 MPI。
+
+与NCCL的区别，也可参考 [github issue](https://github.com/NVIDIA/nccl/issues/679)
+
+![image-20250305110717090](assets/readme/image-20250305110717090.png)
+
+总结一下就是nccl和nvshmem功能存在一些重叠，但 NVSHMEM 更像是低级 API，在 CUDA 级别提供 put/get（加载/存储，单边）语义，而 NCCL 提供双边、批量的操作，是在 CPU 上调用的。nvshmem是单边的语义，意味着用户还要自己控制同步，更细力度的控制。
+
 ## 参考
 
 - [Machine Learning Frameworks Interoperability, Part 2: Data Loading and Data Transfer Bottlenecks](https://developer.nvidia.com/blog/machine-learning-frameworks-interoperability-part-2-data-loading-and-data-transfer-bottlenecks/)
 - [Enable faster memory transfers between CPU and GPU with GDRCopy](https://developer.nvidia.com/gdrcopy)
-
-
-
-
 
