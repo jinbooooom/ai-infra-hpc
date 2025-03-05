@@ -40,16 +40,6 @@ LL128能够以较低的延迟达到较大的带宽率，NCCL会在带有NVLink�
 
 # 算法分析
 
-比较不同算法的时间复杂度。参考HCCL的公式：
-
-| 算法     | 描述                                                         | 原理与耗时                                                   |
-| -------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| Mesh     | Server内通信算法，是Mesh互联拓扑的基础算法。                 | [Mesh](https://gitee.com/ascend/cann-hccl/blob/master/docs/Mesh.md) |
-| Ring     | Server内和Server间通信算法，是基于环结构的并行调度算法。  Server间通信场景下，适用于小规模节点数（<32机，且非2幂）和中大规模通信数据量（>=256M）的场景。 | [Ring](https://gitee.com/ascend/cann-hccl/blob/master/docs/Ring.md) |
-| RHD      | Server间通信算法，递归二分和倍增算法，当通信域内Server个数为2的整数次幂时，此算法具有较好的亲和性。 | [RHD](https://gitee.com/ascend/cann-hccl/blob/master/docs/RHD.md) |
-| Pairwise | Server间通信算法，比较算法，仅用于AllToAll与AlltoAllV算子，适用于数据量较小（<=1M * RankSize）的场景。 | [PairWise](https://gitee.com/ascend/cann-hccl/blob/master/docs/PairWise.md) |
-| Star     | Server内通信算法，Star算法适用于有根节点的通信操作（如Broadcast、Reduce、Gather、Scatter等），利用星型拓扑或全连接拓扑一步完成通信操作。 | [Star](https://gitee.com/ascend/cann-hccl/blob/master/docs/Star.md) |
-
 HCCL采用α–β模型（Hockney）进行性能评估，算法耗时计算用到的变量定义如下：
 
 - α：节点间的固定时延。
@@ -63,6 +53,22 @@ HCCL采用α–β模型（Hockney）进行性能评估，算法耗时计算用�
 - p：通信域节点个数，影响通信步数。
 
   其中单步传输并规约计算n byte数据的耗时为： D = α + nβ + nγ。
+
+| 原语 | 算法 | 耗时 |
+| ---- | ---- | ---- |
+|      |      |      |
+|      |      |      |
+|      |      |      |
+|      |      |      |
+|      |      |      |
+|      |      |      |
+|      |      |      |
+|      |      |      |
+|      |      |      |
+
+
+
+
 
 参考
 
