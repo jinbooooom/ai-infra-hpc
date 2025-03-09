@@ -4,37 +4,37 @@
 
 ### Broadcast Ring
 
-![LynCCL-Broadcast](./assets/readme/LynCCL-Broadcast.png)
+![myCCL-Broadcast](./assets/readme/myCCL-Broadcast.png)
 
 其中红色箭头为不是 in-place 场景下的行为。其实红色箭头的行为完全可以让 root 节点的sendbuff往自己节点的recvBuffer 拷贝，但某些国产芯片同芯片间的P2P比跨芯片间的P2P慢的多，因此就多了红色箭头的拷贝路径，这在GPU中是不存在的。
 
 ### Broadcast Tree
 
-![LCCL-broadcast-Tree](./assets/readme/LCCL-broadcast-Tree.png)
+![myCCL-broadcast-Tree](./assets/readme/myCCL-broadcast-Tree.png)
 
 ### AllGather Full Mesh
 
 ### AllGather Ring
 
-![LynCCL-AllGather-Ring](./assets/readme/LynCCL-AllGather-Ring.png)
+![myCCL-AllGather-Ring](./assets/readme/myCCL-AllGather-Ring.png)
 
 
 
 ### AllGather Bruck
 
-![LCCL-all_gather-bruck](./assets/readme/LCCL-all_gather-bruck.png)
+![myCCL-all_gather-bruck](./assets/readme/myCCL-all_gather-bruck.png)
 
 ### Reduce Tree
 
-![LynCCL-Reduce-Tree](./assets/readme/LynCCL-Reduce-Tree.png)
+![myCCL-Reduce-Tree](./assets/readme/myCCL-Reduce-Tree.png)
 
 ### ReduceScatter Ring
 
-![LynCCL-ReduceScatter-Ring](./assets/readme/LynCCL-ReduceScatter-Ring.png)
+![myCCL-ReduceScatter-Ring](./assets/readme/myCCL-ReduceScatter-Ring.png)
 
 ### AllReduce Ring
 
-![LynCCL-AllReduce-Ring](./assets/readme/LynCCL-AllReduce-Ring.png)
+![myCCL-AllReduce-Ring](./assets/readme/myCCL-AllReduce-Ring.png)
 
 ## 算法耗时总结
 
