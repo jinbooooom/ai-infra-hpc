@@ -249,9 +249,7 @@ M1-N1；M3-N3；M5-N2；M6-N6；N4-N5。
 
 ### AI并行配置
 
-AI 场景，Switch 并行配置和上面的串行相比较大的一个区别是 2 个 Switch 分别通过 1 个 Flex Cable连接到
-
-CPU1 上。
+AI 场景，Switch 并行配置和上面的串行相比较大的一个区别是 2 个 Switch 分别通过 1 个 Flex Cable连接到 CPU1 上。
 
 AI-Switch 并行配置的情况下五个 Flex Cable 的连接的方式是：
 
@@ -277,7 +275,7 @@ M1-N1；M3-N3；M5-N5；M6-N6；N2-N4。
 
 - HPC侧重于计算卡和CPU共同运算，计算卡和CPU间通信延时低带宽性能好，但是跨PCIe Switch的计算卡间通信需要通过2个CPU导致延时高且带宽性能差，通信带宽受限于CPU间UPI带宽
 
-- AI并行是AI串行和HPC配置的一个折中方案，跨PCIe Switch的计算卡间通信需要经过1个CPU，通信带宽不受限于CPU间UPI带宽，且PCIe Switch2上的计算卡需要CPU2共同参与运算以及访问CPU2上的内存减少了访问PCIe Switch1的步骤
+- **AI并行是AI串行和HPC配置的一个折中方案**，跨PCIe Switch的计算卡间通信需要经过1个CPU，**通信带宽不受限于CPU间UPI带宽**，且PCIe Switch2上的计算卡需要CPU2共同参与运算以及访问CPU2上的内存减少了访问PCIe Switch1的步骤
 
 基于上述对比，选择AI并行是一个合适的选择。
 
@@ -286,7 +284,20 @@ M1-N1；M3-N3；M5-N5；M6-N6；N2-N4。
 存在的问题：
 
 - 跨PCIe Switch的计算卡间通信需要通过2个CPU导致延时高且带宽性能差，且CPU间采用QPI连接，通信带宽受限于CPU间QPI带宽
-
 - 每个CPU下2个PCIe Switch，即使在同一个CPU下的计算卡间通信也有可能需要经过CPU，影响延时和带宽。
 
 ![image-20250226230918219](./assets/readme/image-20250226230918219.png)
+
+### QPI与UPI
+
+**QPI，即Intel的QuickPath Interconnect，译为快速通道互联**。也即CSI（Common System Interface），用来实现芯片之间的直接互联，而不是在通过FSB连接到北桥，矛头直指AMD的HT总线。无论是速度、带宽、每个针脚的带宽、功耗等一切规格都要超越HT总线。FSB，将CPU中央处理器连接到北桥芯片的系统总线，它是CPU和外界交换数据的主要通道。
+
+**UPI，即Intel的Ultra Path Interconnect，取代QPI的技术**。拥有更高的通信速率、效率、更低的功耗。
+
+参考：https://blog.csdn.net/asd892776222/article/details/102783856
+
+![image-20250312224524774](./assets/readme/image-20250312224524774.png)
+
+
+
+![image-20250312224536844](./assets/readme/image-20250312224536844.png)
