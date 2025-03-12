@@ -95,7 +95,7 @@ RDMA   技术实现了在网络传输过程中两个节点之间数据缓冲区�
 RDMA 作为一种 host-offload，host-bypass 技术，使低延迟、高带宽的直接的内存到内存的数据通信成为了可能。目前支持 RDMA 的网络协议有： 
 
 - InfiniBand（IB）：从一开始就支持 RDMA 的新一代网络协议。由于这是一种新的网络技术，因此需要支持该技术的网卡和交换机。 
-- RDMA 过融合以太网（RoCE）：即 RDMA over Converged Ethernet，允许通过以太网执行 RDMA 的网络协议。这允许在标准以太网基础架构（交换机）上使用 RDMA，只不过网卡必须是支持 RoCE 的特殊的网卡。  
+- RDMA over Converged Ethernet（RoCE）：允许通过以太网执行 RDMA 的网络协议。这允许在标准以太网基础架构（交换机）上使用 RDMA，只不过网卡必须是支持 RoCE 的特殊的网卡【交换机可以是以太网，但网卡必须支持 RoCE】。  
 - 互联网广域 RDMA 协议（iWARP）：即 Internet Wide Area RDMA Protocol，其实也就是 RDMA over  TCP，允许通过 TCP 执行 RDMA  的网络协议。这允许在标准以太网基础架构（交换机）上使用RDMA，只不过网卡要求是支持iWARP（如果使用 CPU offload  的话）的网卡。否则，所有 iWARP 栈都可以在软件中实现，但是失去了大部分的 RDMA 性能优势。
 
 **需要注意的是，上述几种协议都需要专门的硬件（网卡）支持**
@@ -120,7 +120,7 @@ InfiniBand 架构获得了极好的性能，但是其不仅要求在服务器上
 
 RoCE协议存在RoCEv1 （RoCE）和RoCEv2 （RRoCE）两个版本，主要区别RoCEv1是基于以太网链路层（L2）实现的RDMA协议(交换机需要支持PFC等流控技术，在物理层保证可靠传输)，而RoCEv2是以太网TCP/IP协议中UDP层(L3)实现。
 
-在以太链路层之上用IB网络层代替了TCP/IP网络层，所以不支持IP路由功能。而v2使用了UDP+IP作为网络层，使得数据包也可以被路由。RoCE可以被认为是IB的“低成本解决方案”，将IB的报文封装成以太网包进行收发。由于RoCE v2可以使用以太网的交换设备，所以现在在企业中应用也比较多，但是相同场景下相比IB性能要有一些损失。
+RoCEv1 在以太链路层之上用IB网络层代替了TCP/IP网络层，所以不支持IP路由功能。而v2使用了UDP+IP作为网络层，使得数据包也可以被路由。RoCEv1可以被认为是IB的“低成本解决方案”，将IB的报文封装成以太网包进行收发。由于RoCE v2可以使用以太网的交换设备，所以现在在企业中应用也比较多，但是相同场景下相比IB性能要有一些损失。
 ![image-20220816105142578](assets/rdma/image-20220816105142578.png)
 
 #### [RDMA 、InfiniBand、IBoE、RoCE、iWARP、IB卡、IB驱动的关系](https://blog.csdn.net/ljlfather/article/details/102930714)
@@ -138,6 +138,26 @@ RoCE协议存在RoCEv1 （RoCE）和RoCEv2 （RRoCE）两个版本，主要区�
 3、如果使用 Infiniband 协议，这个协议作为一个新一代网络协议。它必须依靠专门的硬件才能实现。(专用INC（网卡）—— IB卡+专用交换机===>专用网络）。
 
 **如果使用roce、iwarp，需要专用网卡，但不需要专用网络（RDMA会转成以太网协议，继续用以太网传输）**
+
+### RoCEv1与RoCEv2性能的差异
+
+DeepSeek：
+
+1. **协议开销与带宽效率**
+
+- RoCEv1（Layer 2）
+  - 无IP/UDP头部，有效载荷占比更高。
+  - 理论带宽损耗：仅以太网帧头（18字节），64B小包有效带宽利用率达 **89%**。
+- RoCEv2（Layer 3）
+  - 增加IPv4（20B）+ UDP（8B）头部，总开销46字节。
+  - 64B小包有效带宽利用率降至 **72%**，但MTU=9000时差异可忽略。
+
+2. 延迟敏感型场景表现
+
+- 本地二层网络（无路由）
+  - RoCEv1延迟 **1.1-1.3μs**，RoCEv2因协议栈处理增加至 **1.4-1.6μs**（NIC硬件Offload优化后差距缩小至0.2μs）。
+- 跨子网路由（3跳）
+  - RoCEv1无法支持，RoCEv2延迟约 **3.5μs**（依赖TSN交换机低抖动调度）
 
 ## [DPDK和RDMA的区别](https://zhuanlan.zhihu.com/p/617470551)
 
@@ -182,6 +202,15 @@ Doorbell有两种实现机制：
   - 缺点：实时性较差
 
 可以把DB理解成软件通知硬件的方式。
+
+## 拥塞控制
+
+DCQCN
+
+**RoCEv2**：
+
+- 支持 **ECN（Explicit Congestion Notification）** 与 **DCQCN（Data Center Quantized Congestion Notification）**，可实现端到端拥塞感知。
+- **扩展性优势**：通过IP路由支持数万节点互联，适合多云和跨数据中心场景
 
 ## SEND & RECV
 
@@ -273,7 +302,7 @@ WRITE/READ操作中的目的地址和钥匙是通过我们SEND-RECV操作来完�
 
 - 请求端APP以WQE的形式下发一次READ任务。
 - 请求端硬件从SQ中取出WQE，解析信息。
-- 请求端网卡将READ请求包通过物理链路发送给响应端网卡。
+- 请求端网卡将READ请求包通过物理链路发送给响应端网卡。（相比于Write多了请求这一步，READ延迟比Write高一些）
 - 响应端收到数据包，解析目的虚拟地址，转换成本地物理地址，解析数据，从指定内存区域取出数据。
 - 响应端硬件将数据组装成回复数据包发送到物理链路。
 - 请求端硬件收到数据包，解析提取出数据后放到READ WQE指定的内存区域中。
@@ -292,7 +321,7 @@ QP Context（简称QPC）可以简单理解为是记录一个QP相关信息的�
 
 <img src="assets/rdma/rdma-Connect1.png" alt="rdma-Connect1" style="zoom: 25%;" />
 
-以socket交换方式为例，双方约定好消息格式，将需要传递的信息通过socket交换就好了。图中LID是本端RDMA适配器激活后分配的ID，在本端唯一，而PSN是本端发送到对端第一个数据包序号，可以随机指定。信息交换完毕后即可关闭上述连接。
+以socket交换方式为例，双方约定好消息格式，将需要传递的信息通过socket交换就好了。图中LID是本端RDMA适配器激活后分配的ID，在本端唯一，而PSN是本端发送到对端第一个数据包序号，可以随机指定。信息交换完毕后即可关闭上述socket连接。
 
 至此，目的集合已经准备好，有raddr、rkey、rGID、rQPN，加r表示远端（对端）的意思。万事具备只欠东风。
 
@@ -345,7 +374,7 @@ MR全称为Memory Region，指的是由RDMA软件层在内存中规划出的一�
 
 A节点想要通过IB协议向B节点的内存中写入一段数据，上层应用给本节点的RDMA网卡下发了一个WQE，WQE中包含了源内存地址、目的内存地址、数据长度和秘钥等信息，然后硬件会从内存中取出数据，组包发送到对端网卡。B节点的网卡收到数据后，解析到其中的目的内存地址，把数据写入到本节点的内存中。
 
-APP在WQE中提供的地址是虚拟地址（Virtual Address，VA），经过MMU的转换才能得到真实的物理地址（Physical Address，PA），我们的RDMA网卡是如何得到PA从而去内存中拿到数据的呢？就算网卡知道上哪去取数据，如果用户恶意指定了一个非法的VA，那网卡岂不是有可能被“指使”去读写关键内存？
+APP在WQE中提供的地址是虚拟地址（Virtual Address，VA），经过MMU(Memory Management Unit，内存管理单元)的转换才能得到真实的物理地址（Physical Address，PA），我们的RDMA网卡是如何得到PA从而去内存中拿到数据的呢？就算网卡知道上哪去取数据，如果用户恶意指定了一个非法的VA，那网卡岂不是有可能被“指使”去读写关键内存？
 
 为了解决上面的问题，IB协议提出了MR的概念。
 
@@ -501,7 +530,7 @@ Verbs API分为用户态和内核态，分别以`ibv_`和`ib_`作为前缀。RDM
 
 注册MR需要从用户态陷入内核态，调用内核提供的函数pin住内存（防止换页），然后制作虚拟-物理地址映射表并下发给硬件。
 
-因为MR是由内核管理的，如果用户想修改一个已经存在的MR的信息，比如回收某个MR的远端写权限，只保留远端读权限；或者想要使一个之前已经授权给远端节点的R_Key失效，那么用户需要通过重注册MR（Reregister MR）接口来进行修改，该接口等价于先取消注册MR（Deregister MR），然后注册MR（Register MR）。上述流程需要陷入内核态来完成，而这个过程是耗时较长的。
+**因为MR是由内核管理的，如果用户想修改一个已经存在的MR的信息，比如回收某个MR的远端写权限，只保留远端读权限；或者想要使一个之前已经授权给远端节点的R_Key失效，那么用户需要通过重注册MR（Reregister MR）接口来进行修改，该接口等价于先取消注册MR（Deregister MR），然后注册MR（Register MR）。上述流程需要陷入内核态来完成，而这个过程是耗时较长的。**
 
 不同于需要通过控制路径修改权限的MR，MW在创建好之后，可以通过数据路径（即通过用户态直接下发WR到硬件的方式）动态的绑定到一个已经注册的MR上，并同时设置或者更改其访问权限，这个过程的速度远远超过重新注册MR的过程。
 
@@ -519,7 +548,7 @@ Verbs API分为用户态和内核态，分别以`ibv_`和`ib_`作为前缀。RDM
 
 ![image-20241227161540194](assets/rdma/image-20241227161540194.png)
 
-IB卡（NIC）通常通过PCI Express（PCIe）插槽连接到服务器。PCIe I/O子系统的主要导体（conductor ）是根复合体（Roo Complex, RC）。
+IB卡（NIC）通常通过PCI Express（PCIe）插槽连接到服务器。PCIe I/O子系统的主要导体（conductor ）是根复合体（Root Complex, RC）。
 
 RC将处理器和内存连接到PCIe结构。CPU和Memory和PCIe结构通过RC（Roo Complex, RC）将连接在一起。
 
