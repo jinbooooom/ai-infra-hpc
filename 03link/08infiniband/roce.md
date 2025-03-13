@@ -111,6 +111,14 @@ DeepSeek 总结:
 
 ### RoCE编程中的常见错误
 
+#### Unable to Connect the HCA's through the link
+
+需要绑定 IP 与 RoCE 卡
+
+![image-20250313101754382](assets/roce/image-20250313101754382.png)
+
+![image-20250313101610983](assets/roce/image-20250313101610983.png)
+
 #### Failed to change qp to rtr. Errno: Invalid argument.
 
 我遇到这个问题是因为当初没有使用gid。RoCEv2与Infiniband的不同之一就是RoCEv2底层是使用的传统Ethernet，用不到LID（LID是在IB子网中用到的一种数据，RoCE中LID恒为0）。在RoCE中，即使是一台主机上的两台虚拟机通信，也要用到gid，即is_global要为1.
@@ -153,6 +161,48 @@ mlx5_4  1       1       fe80:0000:0000:0000:ee0d:9aff:fe2f:c21a                 
 如上图，可以看到在ib_send_bw中，服务器端（左）用的gid_index为2，客户端（右）用的gid_index为1，因此我在代码中也是硬编码地让服务器端使用gid_index=2，客户端使用gid_index=1，这样就解决了此问题。（使用RDMA verbs的话貌似程序可以自动选择正确的gid_index，在这里只用了VPI verbs）
 
 参考 [RDMA学习-如何在两台虚拟机之间使用Soft-RoCE进行编程实验](https://zhuanlan.zhihu.com/p/449803157?utm_id=0)
+
+## RoCEv2 测试
+
+![image-20250313094638194](assets/roce/image-20250313094638194.png)
+
+可以看出在传输层是 InfiniBand 协议，在链路层是 Ethernet 协议，确实是 RoCE。
+
+```shell
+```
+
+### 查看是RoCEv1还是RoCEv2
+
+### **通过网卡信息查询**
+
+使用 `ibv_devinfo` 命令
+
+运行以下命令查看网卡支持的 RDMA 协议类型：
+
+```shell
+ibv_devinfo -v | grep "transport"
+输出：
+transport:                    InfiniBand (0)          # 表示支持 IB 协议  
+transport:                    Ethernet (1)            # 表示支持 RoCEv1/v2 
+```
+
+若输出包含 **`Ethernet`**，需进一步确认是 v1 还是 v2。RoCEv2 依赖 IP 路由，需通过 GID（Global Identifier）索引绑定 IPv4/IPv6 地址，通过检查 GID 表，即可知道是 v1还是v2：
+
+```shell
+$ ibv_devinfo -v | grep "GID" -A 5
+
+打印：
+                        GID[  0]:               fe80::6a91:d0ff:fe6e:ef18, RoCE v2
+
+hca_id: rocep101s0f1
+        transport:                      InfiniBand (0)
+        fw_ver:                         1.73
+        node_guid:                      6a91:d0ff:fe6e:ef19
+--
+                        GID[  0]:               fe80::6a91:d0ff:fe6e:ef19, RoCE v2
+                        GID[  1]:               fe80::818d:77e7:ab1b:6998, RoCE v2
+                        GID[  2]:               ::ffff:192.168.99.100, RoCE v2
+```
 
 ## 参考
 
