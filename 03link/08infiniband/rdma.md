@@ -634,6 +634,15 @@ int ret = ibv_post_send(qp, &wr1, &bad_wr);
 
 网卡驱动注册了一块`MEM`内存，用户程序`post WQ`的时候往里面写入`WQE`。如果要发送的数据较大，数据放在用户空间的`buff`，那么`WQE`里面的指针指向`buff`。网卡从`MEM`里面读出`WQE`，然后根据`WQE`里面的指针，再去`buff`读取数据。如果要发送的数据较小，就直接把数据放到`WQE`的`payload`区域，一同放入`MEM`内存。这样网卡从`MEM`里面读出`WQE`，就不再需要再去`buff`读取数据。
 
+**数据内联到 WQE**
+ 使用 `IBV_SEND_INLINE` 标志时，发送数据会直接嵌入到工作队列条目（WQE）的描述符中，而非通过指针指向外部内存缓冲区[2](https://www.ctyun.cn/zhishi/p-500510)[5](https://blog.csdn.net/bandaoyu/article/details/119207147)。CPU 直接将数据写入网卡缓冲区，避免了网卡通过 DMA 读取内存的延迟[2](https://www.ctyun.cn/zhishi/p-500510)[8](https://blog.csdn.net/weixin_42319496/article/details/121126234)。
+
+**绕过内存注册与 L_Key 检查**
+ 内联数据无需注册内存区域（Memory Region, MR），也无需验证 L_Key，简化了内存管理流程[2](https://www.ctyun.cn/zhishi/p-500510)[5](https://blog.csdn.net/bandaoyu/article/details/119207147)。
+
+**硬件处理优化**
+ 网卡直接从 WQE 中提取内联数据并发送，省去了额外的内存访问步骤，适合小消息场景
+
 #### [Unsigned Completions（IBV_SEND_SIGNALED）](https://blog.csdn.net/bandaoyu/article/details/119145598)：
 
 `IB`默认是为每个`WQE`发送一个完成信号，但`IB`也允许应用程序关闭指定的`WQE`的完成信号。注意：每隔`post n`个关闭信号的`WQE`，就要`post`一个开启完成信号的`WQE`。因为只有产生`CQE`（Completion Queue Entry），程序去读取了`CQE`之后才会清理发送队列`SQ`（Send Queue）的`SQE`（Send Queue Element）。如果一直没有`CQE`产生，则读取不到`CQE`，也就不会清理发送队列`SQ`，很快发送队列`SQ`就会撑满。

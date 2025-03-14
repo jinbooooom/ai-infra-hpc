@@ -168,9 +168,6 @@ mlx5_4  1       1       fe80:0000:0000:0000:ee0d:9aff:fe2f:c21a                 
 
 可以看出在传输层是 InfiniBand 协议，在链路层是 Ethernet 协议，确实是 RoCE。
 
-```shell
-```
-
 ### 查看是RoCEv1还是RoCEv2
 
 ### **通过网卡信息查询**
@@ -204,30 +201,10 @@ hca_id: rocep101s0f1
                         GID[  2]:               ::ffff:192.168.99.100, RoCE v2
 ```
 
+当前的机器 IP 是 192.168.99.100，根据 “ GID[  2]:               ::ffff:192.168.99.100, RoCE v2” 也可以知道该机器的 gid_idx = 2
+
 ## 参考
 
 - [ROCE技术深度解析](https://www.bilibili.com/video/BV1GPaseFEwD?spm_id_from=333.788.recommend_more_video.0&vd_source=2d2ac911095577ab30d116171d315a7c)
 
 - [Mellanox迈络思bilibili账号](https://space.bilibili.com/3493279043684810)
-
-## 一些概念
-
-### IB子网
-
-DeepSeek：
-
-**InfiniBand子网** 是IB网络中的**逻辑管理单元**，类似于传统IP网络的子网概念，但实现机制完全不同。其核心特性包括：
-
-1. 管理边界
-   - 一个子网由**单一子网管理器（Subnet Manager, SM）** 控制，负责分配地址、配置路由、监控链路状态。
-   - 子网内所有设备（交换机、HCA卡）必须与SM通信并遵循其策略。
-2. 物理范围
-   - 可跨越多个物理交换机，但需确保所有设备通过**InfiniBand链路直连或间接可达**（无IP路由跳跃）。
-3. 通信隔离
-   - **子网内设备可直接通过LID（Local Identifier） 通信，跨子网需依赖GRH（Global Routing Header） 和全局地址（GID）。**
-
-IB子网典型应用场景
-
-- 高性能计算（HPC）集群：单一子网覆盖整个集群，SM统一管理数千节点，确保All-to-All通信效率（如MPI作业）。
-- 分布式存储系统：通过P_Key隔离存储流量与计算流量（如Ceph集群中OSD与客户端的通信）。
-- 云数据中心：多子网架构（如每个租户一个子网），结合GRH实现跨子网RDMA（如AWS EFA）。
