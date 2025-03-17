@@ -140,11 +140,116 @@ B和G都是十亿（1000M或1024M）的意思，M是100万的意思，平时说�
 
 ### 数据并行
 
-![image-20231225104104256](assets/readme/image-20231225104104256.png)
+这是日常应用比较多的情况。每一个device上会加载一份模型，然后把数据分发到每个device并行进行计算，加快训练速度。
+
+常用的 API：
+
+- torch.nn.DataParallel(DP)
+
+- torch.nn.DistributedDataParallel(DDP)
+
+DP 相比 DDP 使用起来更友好（代码少），DDP 支持多机多卡，训练速度更快，负载相对均衡。
+
+#### DP
+
+ ![dp](./assets/readme/dp.png)
+
+![dp2](./assets/readme/dp2.png)
+
+
+
+- 将 inputs 从主 GPU 分发到所有 GPU 上；
+- 将 model 从主 GPU 分发到所有 GPU 上；
+- 每个 GPU 分别独立进行前向传播，得到 outputs；
+- 将每个 GPU 的 outputs 发回主 GPU；
+- 在主 GPU 上，通过 loss function 计算出 loss，对 loss function 求导，求出损失梯度；
+- 计算得到的梯度分发到所有 GPU 上；
+- 反向传播计算参数梯度；
+- 将所有梯度回传到主 GPU，通过梯度更新模型权重；
+- 重复上面的过程；
+
+API 如下：
+
+ ```python
+ torch.nn.DataParallel(module, device_ids=None, output_device=None, dim=0)
+ ```
+
+优缺点
+
+优点：只需要一行代码的增加，易于项目原型的开发
+
+```python
+net = torch.nn.DataParallel(model, device_ids=[0, 1, 2])
+```
+
+缺点：
+
+- 每个前向过程中模型复制引入的延迟
+- GPU的利用不均衡
+- 不支持多机多卡
+
+#### DDP
+
+DDP 过程
+
+![ddp](./assets/readme/ddp.png)
+
+ ![ddp2](./assets/readme/ddp2.png)
+
+ 
+
+与DataParallel的单进程控制多GPU不同，在distributed的帮助下，只需要编写一份代码，torch就会自动将其分配给n个进程，分别在 n 个GPU上运行。不再有主GPU，每个GPU执行相同的任务。对每个GPU的训练都是在自己的进程中进行的。每个进程都从磁盘加载其自己的数据。分布式数据采样器可确保加载的数据在各个进程之间不重叠。损失函数的前向传播和计算在每个GPU上独立执行。因此，不需要收集网络输出。在反向传播期间，梯度下降在所有GPU上均被执行，从而确保每个GPU在反向传播结束时最终得到平均梯度的相同副本。
+
+```python3
+
+#详细步骤如下：
+#1.导入必要的模块：
+import torch
+import torch.nn as nn
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel
+
+#2.初始化torch.distributed包：
+dist.init_process_group(backend='nccl')
+#设置通信后端为NCCL，并协调设备或机器之间的进程组形成。
+
+#3.定义模型并将其包装在DistributedDataParallel中：
+model = Model()
+model = DistributedDataParallel(model)
+#将模型包装在DDP中，以在多个设备或机器上进行并行训练。
+
+#4.将数据加载到每个进程中：
+train_loader=torch.utils.data.DataLoader(train_dataset,batch_size=batch_size,shuffle=True)
+
+#5.调整每个进程的批量大小：
+batch_size_per_process = int(batch_size / dist.get_world_size())
+#确保每个进程都有足够的数据进行处理。
+
+#6.将模型和输入张量移动到正确的设备上：
+model = model.to(device)
+input = input.to(device)
+
+#7.在训练循环中，执行前向传播、反向传播和优化器更新：
+output = model(input)
+loss = criterion(output, target)
+loss.backward()
+optimizer.step()
+
+#8.在训练结束后，将模型的权重和偏置参数同步到所有设备或机器：
+model_state_dict = model.module.state_dict()
+dist.broadcast(model_state_dict, src=0)
+model.module.load_state_dict(model_state_dict)
+#确保所有设备上的模型参数保持一致。
+
+#9.清理分布式环境：
+dist.destroy_process_group()
+```
 
 ### 模型并行
 
 #### Tensor并行
+
+![image-20231225104104256](assets/readme/image-20231225104104256.png)
 
 在上面的这张图里，每一个节点（或者叫进程）都有一份模型，然后各个节点取不同的数据，通常是一个batch_size，然后各自完成前向和后向的计算得到梯度，这些进行训练的进程我们成为worker，除了worker，还有参数服务器，简称ps server，这些worker会把各自计算得到的梯度送到ps server，然后由ps server来进行update操作，然后把update后的模型再传回各个节点。因为在这种并行模式中，被划分的是数据，所以这种并行方式叫数据并行
 
