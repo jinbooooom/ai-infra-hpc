@@ -341,9 +341,39 @@ GPipe 和 PipeDream 流水方案对比。每批数据分为4个微批次，微�
 - [图解大模型训练之：数据并行上篇(DP, DDP与ZeRO)](https://zhuanlan.zhihu.com/p/617133971)
 - [图解大模型训练之：数据并行下篇( DeepSpeed ZeRO，零冗余优化)](https://zhuanlan.zhihu.com/p/618865052)
 
+## ZeRO
 
+目前训练超大规模语言模型技术路线：GPU + PyTorch + Megatron-LM + DeepSpeed。
 
+ **ZeRO介绍**
 
+在使用 ZeRO 进行分布式训练时，可以选择 ZeRO-Offload 和 ZeRO-Stage3 等不同的优化技术。严格来讲ZeRO采用数据并行+张量并行的方式，旨在降低存储。
 
+ZeRO-Offload和ZeRO-Stage3是DeepSpeed中的不同的Zero-Redundancy Optimization技术，用于加速分布式训练，主要区别在资源占用和通信开销方面。
 
+ZeRO-Offload将模型参数分片到不同的GPU上，通过交换节点间通信来降低显存占用，但需要进行额外的通信操作，因此可能会导致训练速度的下降。
+
+ZeRO-Stage3将模型参数分布在CPU和GPU上，通过CPU去计算一部分梯度，从而减少显存占用，但也会带来一定的计算开销。
+
+**ZeRO的三个级别**：
+
+ZeRO-0：禁用所有类型的分片，仅使用 DeepSpeed 作为 DDP (Distributed Data Parallel)
+
+ZeRO-1：分割Optimizer States，减少了4倍的内存，通信容量与数据并行性相同
+
+ZeRO-2：分割Optimizer States与Gradients，8x内存减少，通信容量与数据并行性相同
+
+ZeRO-3：分割Optimizer States、Gradients与Parameters，内存减少与数据并行度和复杂度成线性关系。
+
+ZeRO-Infinity是ZeRO-3的拓展。允许通过使用 NVMe 固态硬盘扩展 GPU 和 CPU 内存来训练大型模型。ZeRO-Infinity 需要启用 ZeRO-3。
+
+ZeRO-DP可以分为三个阶段：Pos, Pg, Pp 。三个阶段对应优化器状态划分、梯度划分和模型参数划分，并且三个阶段可以叠加使用(上图展示了三个阶段的叠加)。ZeRO的几个级别如下图2所示，假设模型参数量为7.5B，不同级别的显存情况如下。
+
+![ZeRO1](./assets/readme/ZeRO1.png)
+
+上图是ZeRO不同级别内存划分
+
+![ZeRO2](./assets/readme/ZeRO2.png)
+
+上图是不同参数量的切分
 
