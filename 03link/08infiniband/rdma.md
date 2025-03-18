@@ -771,9 +771,9 @@ int ret = ibv_post_send(qp, &wr1, &bad_wr);
 
 ##### 使用INLINE的陷阱
 
-根据文档, inline发送不需要等待wc就可以重用发送buffer. 不需要等待wc就可以继续发消息，但是如果不处理wc，那么就不会清理sr，连续不断的继续发送INLINE消息（而不去处理wc），sr得不到清理最终会撑爆sq，导致最后发不出消息。
+根据文档, `inline` 发送不需要等待 `wc` 就可以重用发送 `buffer`。不需要等待`wc`就可以继续发消息，但是如果不处理`wc`，那么就不会清理`sr`，连续不断的继续发送`INLINE`消息，而不去处理`wc`，`sr`得不到清理最终会撑爆`sq`，导致最后发不出消息。
 
-所以使用INLINE的时候记得在sq撑爆之前去处理wc
+所以使用INLINE的时候记得在`sq`撑爆之前去处理`wc`
 
 参考：
 
@@ -782,7 +782,7 @@ int ret = ibv_post_send(qp, &wr1, &bad_wr);
 - https://www.ctyun.cn/zhishi/p-500510
 - https://blog.csdn.net/weixin_42319496/article/details/121126234
 
-#### [Unsigned Completions（IBV_SEND_SIGNALED）](https://blog.csdn.net/bandaoyu/article/details/119145598)：
+##### [Unsigned Completions（IBV_SEND_SIGNALED）](https://blog.csdn.net/bandaoyu/article/details/119145598)：
 
 `IB`默认是为每个`WQE`发送一个完成信号，但`IB`也允许应用程序关闭指定的`WQE`的完成信号。注意：每隔`post n`个关闭信号的`WQE`，就要`post`一个开启完成信号的`WQE`。因为只有产生`CQE`（Completion Queue Entry），程序去读取了`CQE`之后才会清理发送队列`SQ`（Send Queue）的`SQE`（Send Queue Element）。如果一直没有`CQE`产生，则读取不到`CQE`，也就不会清理发送队列`SQ`，很快发送队列`SQ`就会撑满。
 关闭`Completion`可以减少`NIC`对`CQE`的`DMA writes`。此外，应用程序轮询更少的`CQE`，从而减少了开销。
@@ -993,7 +993,98 @@ root@vcjob-3937-mpimaster-0:/sys/class/pci_bus/0000:41/device# cat numa_node
 
 其中每行的第一组字符串就是bdf（bus, device, function）
 
+## ibv_send_flags
 
+`enum ibv_send_flags` 是 RDMA（远程直接内存访问）中用于控制发送请求行为的关键标志集合，具体作用如下：
+
+1. **IBV_SEND_FENCE**
+
+- **作用**：确保操作顺序性。标记该请求后，需等待之前所有未完成的 RDMA 操作（如 Read/Atomic）完成后才会执行当前请求[6](https://blog.csdn.net/qq_38158479/article/details/130228679)[8](https://www.imspm.com/dev/301802.html)。
+- **使用场景**：用于需要严格顺序的原子操作（如 Read-Modify-Write），避免数据竞争。
+
+2. **IBV_SEND_SIGNALED**
+
+- **作用**：控制是否生成完成事件（Work Completion, WC）。若设置，请求处理完成后会在完成队列（CQ）中生成 WC；若不设置，则无 WC（称为“静默完成”）[2](https://www.ctyun.cn/zhishi/p-500510)[5](https://blog.csdn.net/weixin_42319496/article/details/121125377)[11](https://blog.csdn.net/weixin_42319496/article/details/121126235)。
+- **优化意义**：减少 WC 数量可降低 CPU 轮询开销，但需每隔 N 个请求设置一次 SIGNALED，避免发送队列阻塞[2](https://www.ctyun.cn/zhishi/p-500510)。
+
+3. **IBV_SEND_SOLICITED**
+
+- **作用**：通知接收端立即处理该请求。接收端会为带有此标志的请求生成即时完成事件，而非等待缓冲区填满。
+- **适用场景**：用于关键小数据（如控制信号），减少延迟。
+
+4. **IBV_SEND_INLINE**
+
+- **作用**：将数据直接嵌入工作请求（WQE），而非通过 DMA 从用户缓冲区读取。CPU 直接将数据写入网卡缓冲区，无需内存注册（L_Key 检查被跳过）[2](https://www.ctyun.cn/zhishi/p-500510)[5](https://blog.csdn.net/weixin_42319496/article/details/121125377)[7](https://blog.csdn.net/qq_38158479/article/details/128975872)。
+
+- 优势与限制
+
+  ：
+
+  - 优势：减少 DMA 操作，提升小数据性能；数据可立即重用。
+  - 限制：仅支持 `IBV_WR_SEND` 和 `IBV_WR_RDMA_WRITE` 操作；数据大小受硬件限制（通常 ≤ 256B）。
+
+5. **IBV_SEND_IP_CSUM**
+
+- **作用**：指示网卡硬件计算 IP 数据包的校验和，卸载 CPU 计算负担。
+- **适用场景**：需发送 IP 协议数据时（如 RoCE 网络），提升吞吐量。
+
+综合应用示例
+
+```c
+struct ibv_send_wr wr = {
+    .opcode = IBV_WR_SEND,
+    .send_flags = IBV_SEND_INLINE | IBV_SEND_SIGNALED,  // 内联数据且需完成通知，避免创建 QP 时 qp_init_attr.sq_sig_all=0，导致收不到完成通知，发送队列变满。当然也可以设置每隔几次发送，设置一个带有 IBV_SEND_SIGNALED 标志位的 WR。
+    .sg_list = &sge,
+    .num_sge = 1
+};
+```
+
+- **INLINE + SIGNALED**：适用于需快速发送小数据并确认送达的场景（如关键控制指令）
+- **SIGNALED 与队列管理**：若长期禁用 SIGNALED，需定期发送带 SIGNALED 的请求以释放队列资源。
+- **INLINE 与数据安全**：内联数据不验证内存权限（L_Key），需确保缓冲区合法性
+
+## qp_init_attr.sq_sig_all的作用
+
+`qp_init_attr.sq_sig_all`  是 RDMA 中创建 Queue Pair (QP) 时的重要参数，用于控制发送队列（SQ）的默认完成事件生成行为。其作用如下：
+
+- **当 `sq_sig_all = 1`**
+   所有提交到发送队列（SQ）的发送请求（Send Request, SR）**默认自动生成完成事件（Work Completion, WC）**，无需在每个请求中显式设置 `IBV_SEND_SIGNALED` 标志。
+   示例：适用于需要逐个确认请求完成的关键场景（如事务型操作）。
+- **当 `sq_sig_all = 0`**
+   默认情况下发送请求不会生成 WC，需在特定请求中显式设置 `IBV_SEND_SIGNALED` 标志以触发完成事件。
+   示例：适用于批量发送场景（如流式数据传输），通过选择性设置 `SIGNALED` 减少事件数量。
+
+**性能影响**
+
+- **`sq_sig_all = 1` 的代价**
+   每个请求生成 WC 会增加 CPU 轮询完成队列（CQ）的开销，可能降低吞吐量。
+- **`sq_sig_all = 0` 的优化**
+   通过显式设置 `IBV_SEND_SIGNALED`（例如每隔 N 个请求设置一次），可减少 WC 数量，降低 CPU 负载（减少 poll CQ 的次数），但需注意队列资源管理。
+
+**配置建议**
+
+| 场景                       | 推荐设置                                 | 理由                   |
+| -------------------------- | ---------------------------------------- | ---------------------- |
+| 高可靠性要求（如事务操作） | `sq_sig_all = 1`                         | 确保每个操作均有确认   |
+| 高吞吐量需求（如流式传输） | `sq_sig_all = 0`                         | 减少 WC 数量，提升性能 |
+| 混合场景（批量+关键请求）  | `sq_sig_all = 0` + 选择性设置 `SIGNALED` | 平衡性能与可靠性       |
+
+示例代码
+
+```c
+    // create the QP
+    memset(&qp_init_attr, 0, sizeof(qp_init_attr));
+    qp_init_attr.qp_type = IBV_QPT_RC;
+    qp_init_attr.sq_sig_all = 1;
+    qp_init_attr.send_cq = m_res->cqs[CQ_Data_Send];
+    qp_init_attr.recv_cq = m_res->cqs[CQ_Data_Recv];
+    qp_init_attr.cap.max_send_wr = QP_MAX_WR;
+    qp_init_attr.cap.max_recv_wr = QP_MAX_WR;
+    qp_init_attr.cap.max_send_sge = QP_MAX_DATA_SGE;
+    qp_init_attr.cap.max_recv_sge = QP_MAX_DATA_SGE;
+
+    m_res->qps[CH_Data] = ibv_create_qp(m_res->pd, &qp_init_attr);
+```
 
 # RDMA 环境
 
