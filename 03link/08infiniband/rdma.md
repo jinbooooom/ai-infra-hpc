@@ -1069,8 +1069,6 @@ struct ibv_send_wr wr = {
 | 高吞吐量需求（如流式传输） | `sq_sig_all = 0`                         | 减少 WC 数量，提升性能 |
 | 混合场景（批量+关键请求）  | `sq_sig_all = 0` + 选择性设置 `SIGNALED` | 平衡性能与可靠性       |
 
-示例代码
-
 ```c
     // create the QP
     memset(&qp_init_attr, 0, sizeof(qp_init_attr));
@@ -1082,9 +1080,33 @@ struct ibv_send_wr wr = {
     qp_init_attr.cap.max_recv_wr = QP_MAX_WR;
     qp_init_attr.cap.max_send_sge = QP_MAX_DATA_SGE;
     qp_init_attr.cap.max_recv_sge = QP_MAX_DATA_SGE;
+    // qp_init_attr.cap.max_inline_data = 32; // 设置内联最大容量
 
     m_res->qps[CH_Data] = ibv_create_qp(m_res->pd, &qp_init_attr);
 ```
+
+## 如果sq_sig_all=0，每隔 N 个请求设置一次IBV_SEND_SIGNALED，发送队列的头尾指针更新过程
+
+`如果sq_sig_all=0，SR深度为100，每10个WR，才设置一个带IBV_SEND_SIGNALED标志的WR，下面讨论发送队列的头尾指针更新过程。`
+
+在 RDMA 中，发送队列（SQ）是一个环形缓冲区，其头指针（Producer Index）和尾指针（Consumer Index）的管理规则如下：
+
+- **头指针/生产指针（Producer Index）**：由用户态驱动控制，每次提交一个工作请求（WR）时，头指针递增 **1**（无论是否设置`IBV_SEND_SIGNALED`）。
+- **尾指针/消费指针（Consumer Index）**：由硬件控制，无论是否设置 `IBV_SEND_SIGNALED`，硬件处理每个 WR 时都会 **逐个释放槽位**，尾指针（Consumer Index）**逐次递增 1**，而`不是`在遇到带 `IBV_SEND_SIGNALED` 的 WR 时一次性跳跃 10 个偏移。
+
+ 假设 SQ 深度为 100，每 10 个 WR 设置一个 `SIGNALED`。虽然硬件处理每个 WR 都会释放槽位，`但软件需在第 10 个 WR 的 WC 生成后，才能确认前 10 个槽位可用。若未及时处理 WC，软件可能误判队列已满`。造成误判的原因是**`资源释放的可见性依赖完成事件（WC）`**。
+
+**硬件处理与软件感知的分离，导致硬件逐次释放槽位（尾指针递增），但软件需要依赖完成事件（WC），才能感知槽位已释放**
+
+- **若未设置 `IBV_SEND_SIGNALED`**：WC 不会生成，软件无法得知哪些槽位已释放，导致可用队列槽位的逻辑计算错误。
+- **若设置 `IBV_SEND_SIGNALED`**：WC 生成后，软件通过轮询完成队列（CQ）确认槽位释放，从而正确回收资源。
+
+**示例场景（SQ 深度 100，每 10 个 WR 设置 1 个 SIGNALED）**
+
+| 操作阶段                       | 头指针行为           | 尾指针行为           |                           软件层                            |
+| ------------------------------ | -------------------- | -------------------- | :---------------------------------------------------------: |
+| 提交前 9 个 WR                 | 从 1 → 9（逐个递增） | 从 1 → 9（逐个递增） |                    软件不知道前9个WR完成                    |
+| 处理第 10 个 WR（带 SIGNALED） | 保持 10              | 保持 10              | 硬件处理完前 10 个 WR，发送WC，此时软件知道十个WR全部完成。 |
 
 # RDMA 环境
 
