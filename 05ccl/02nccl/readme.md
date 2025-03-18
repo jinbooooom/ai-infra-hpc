@@ -93,6 +93,56 @@ HCCL采用α–β模型（Hockney）进行性能评估，算法耗时计算用�
 
 ## UniqueId的创建
 
+```c
+static ncclResult_t createListenSocket(int *fd, union socketAddress *localAddr) {
+  /* IPv4/IPv6 support */
+  int family = localAddr->sa.sa_family;
+  int salen = (family == AF_INET) ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
+ 
+  /* Create socket and bind it to a port */
+  int sockfd = socket(family, SOCK_STREAM, 0);
+  if (sockfd == -1) {
+    WARN("Net : Socket creation failed : %s", strerror(errno));
+    return ncclSystemError;
+  }
+ 
+  if (socketToPort(&localAddr->sa)) {
+    // Port is forced by env. Make sure we get the port.
+    int opt = 1;
+#if defined(SO_REUSEPORT)
+    SYSCHECK(setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)), "setsockopt");
+#else
+    SYSCHECK(setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)), "setsockopt");
+#endif
+  }
+ 
+  // localAddr port should be 0 (Any port)
+  SYSCHECK(bind(sockfd, &localAddr->sa, salen), "bind");
+ 
+  /* Get the assigned Port */
+  socklen_t size = salen;
+  SYSCHECK(getsockname(sockfd, &localAddr->sa, &size), "getsockname");
+ 
+#ifdef ENABLE_TRACE
+  char line[1024];
+  TRACE(NCCL_INIT|NCCL_NET,"Listening on socket %s", socketToString(&localAddr->sa, line));
+#endif
+ 
+  /* Put the socket in listen mode
+   * NB: The backlog will be silently truncated to the value in /proc/sys/net/core/somaxconn
+   */
+  SYSCHECK(listen(sockfd, 16384), "listen");
+  *fd = sockfd;
+  return ncclSuccess;
+}
+```
+
+创建监听fd，ip由localaddr指定，初始端口为0，bind时随机找一个可用端口，并通过getsockname(sockfd, &localAddr->sa, &size)将ip端口写回到localaddr，这里localaddr就是UniqueId。
+
+**到这里UniqueId也就产生了，其实就是当前机器的ip和port**
+
+https://blog.csdn.net/KIDGIN7439/article/details/126712106
+
 ## [NCCL Protocol](https://zhuanlan.zhihu.com/p/699178659)
 
 ### Simple协议
@@ -128,6 +178,33 @@ Flag校验位为：8B
 LL128能够以较低的延迟达到较大的带宽率，NCCL会在带有NVLink的机器上默认使用该Protocol。
 
 ![img](./assets/readme/v2-70a52241e2e43ffc825ab5d44f855a7e_1440w.jpg)
+
+### Simple 协议
+
+**Simple**：这是NCCL的基础通信协议，实现上相对简单，适用于不需要特别优化的通信场景。
+
+
+
+### LL 和 LL128 协议的对比
+
+|     特性     |             LL 协议              |                LL128 协议                 |
+| :----------: | :------------------------------: | :---------------------------------------: |
+|  数据块大小  |     较小（通常为 128 字节）      | 较大（通常为 128 字节的倍数，如 128 * N） |
+|     延迟     |                低                |                   较低                    |
+|  带宽利用率  |               较高               |                   极高                    |
+| 适用数据规模 |   中等规模（几百 KB 到几 MB）    |         大规模（几 MB 到几百 MB）         |
+|   硬件优化   | 优化 NVLink 和 PCIe 的低延迟特性 |     优化 NVLink 和 PCIe 的高带宽特性      |
+|   适用场景   |  单节点多 GPU、中等规模数据传输  |      多节点 GPU 集群、大规模数据传输      |
+
+### 为什么 LL128 协议的数据块较大？
+
+LL128 协议是 LL 协议的扩展，其核心思想是通过增加数据块大小来减少通信开销，从而提高带宽利用率。具体来说：
+
+- 减少通信次数：较大的数据块意味着每次传输的数据量增加，从而减少通信次数，降低通信开销。
+
+- 提高带宽利用率：大数据块能够更好地利用 NVLink 和 PCIe 的高带宽特性，最大化传输效率。
+
+参考：https://blog.csdn.net/bandaoyu/article/details/146133103
 
 # 千卡训练经验
 
@@ -178,3 +255,85 @@ PyTorch在1.10就引入了torchelastic
 **大小梯度同步**
 
 我一直认为梯度同步不应该以GPU/进程为单位。而应该分为大同步（节点间同步）和小同步（节点内同步）。`小同步可以更高频的进行，大同步则可以更慢的执行`。这样不仅能提高实际的梯度同步频率，降低同步总耗时，并且还能天然的去结合小batch和大batch训练的优点—节点内小batch关注个体，节点间大batch关注整体。
+
+# 其它命令
+
+
+
+## 查看拓扑
+
+```shell
+nvidia-smi topo -m
+```
+
+最典型的当然有 nvidia-smi 和 nvidia-smi topo -m。前者都非常熟悉了，这里我对比下两台集群的 nvidia-smi topo -m 的输出：
+
+    GPU0    GPU1    GPU2    GPU3    GPU4    GPU5    GPU6    GPU7    CPU Affinity    NUMA Affinity   GPU NUMA ID
+    GPU0     X  SYS SYS SYS SYS SYS SYS SYS 0-15,32-47  0       N/A
+    GPU1    SYS  X  SYS SYS SYS SYS SYS SYS 0-15,32-47  0       N/A
+    GPU2    SYS SYS  X  SYS SYS SYS SYS SYS 0-15,32-47  0       N/A
+    GPU3    SYS SYS SYS  X  SYS SYS SYS SYS 0-15,32-47  0       N/A
+    GPU4    SYS SYS SYS SYS  X  SYS SYS SYS 16-31,48-63 1       N/A
+    GPU5    SYS SYS SYS SYS SYS  X  SYS SYS 16-31,48-63 1       N/A
+    GPU6    SYS SYS SYS SYS SYS SYS  X  SYS 16-31,48-63 1       N/A
+    GPU7    SYS SYS SYS SYS SYS SYS SYS  X  16-31,48-63 1       N/A
+     
+    Legend:
+     
+      X    = Self
+      SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
+      NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node
+      PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
+      PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
+      PIX  = Connection traversing at most a single PCIe bridge
+      NV#  = Connection traversing a bonded set of # NVLinks
+      
+    GPU0    GPU1    GPU2    GPU3    GPU4    GPU5    GPU6    GPU7    CPU Affinity    NUMA Affinity   GPU NUMA ID
+    GPU0     X      NV18    NV18    NV18    NV18    NV18    NV18    NV18    0-47,96-143     0               N/A
+    GPU1    NV18     X      NV18    NV18    NV18    NV18    NV18    NV18    0-47,96-143     0               N/A
+    GPU2    NV18    NV18     X      NV18    NV18    NV18    NV18    NV18    0-47,96-143     0               N/A
+    GPU3    NV18    NV18    NV18     X      NV18    NV18    NV18    NV18    0-47,96-143     0               N/A
+    GPU4    NV18    NV18    NV18    NV18     X      NV18    NV18    NV18    48-95,144-191   1               N/A
+    GPU5    NV18    NV18    NV18    NV18    NV18     X      NV18    NV18    48-95,144-191   1               N/A
+    GPU6    NV18    NV18    NV18    NV18    NV18    NV18     X      NV18    48-95,144-191   1               N/A
+    GPU7    NV18    NV18    NV18    NV18    NV18    NV18    NV18     X      48-95,144-191   1               N/A
+     
+    Legend:
+     
+      X    = Self
+      SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
+      NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node
+      PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
+      PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
+      PIX  = Connection traversing at most a single PCIe bridge
+      NV#  = Connection traversing a bonded set of # NVLinks
+
+可以读出很多有趣的信息：
+
+通过对比这两个集群的拓扑信息，我可以得出以下几个重要结论：
+
+**互联方式**
+第一个集群：所有 GPU 之间通过 PCIe 和 NUMA 节点间的 SMP 互联（标记为 SYS）
+第二个集群：所有 GPU 之间通过 18 条 NVLink 连接（标记为 NV18）
+性能影响：第二个集群的 GPU 间通信性能显著优于第一个集群，因为 NVLink 的带宽和延迟都优于 PCIe+SMP 方案
+
+**NUMA 架构**
+两个集群都采用双 NUMA 节点设计：
+GPU 0-3 属于 NUMA 节点 0
+GPU 4-7 属于 NUMA 节点 1
+GPU 通信：应尽量将相关任务分配到同一 NUMA 节点内的 GPU，以避免跨 NUMA 节点的频繁数据传输
+
+**CPU 核心分配**：
+第一个集群：每个 NUMA 节点分配 32 个核心（如 0-15,32-47）
+第二个集群：每个 NUMA 节点分配 96 个核心（如 0-47,96-143）
+
+**系统规模**
+GPU 数量：两个集群都是 8 GPU 配置
+CPU 核心总数：
+第一个集群：64 核心
+第二个集群：192 核心
+
+**拓扑完整性**
+每个 GPU 都与其他所有 GPU 直接相连
+
+参考：https://zhuanlan.zhihu.com/p/6160835906
