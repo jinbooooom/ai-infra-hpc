@@ -782,10 +782,12 @@ int ret = ibv_post_send(qp, &wr1, &bad_wr);
 - https://www.ctyun.cn/zhishi/p-500510
 - https://blog.csdn.net/weixin_42319496/article/details/121126234
 
-##### [Unsigned Completions（IBV_SEND_SIGNALED）](https://blog.csdn.net/bandaoyu/article/details/119145598)：
+#### [Unsigned Completions（不设置 IBV_SEND_SIGNALED）](https://blog.csdn.net/bandaoyu/article/details/119145598)：
 
 `IB`默认是为每个`WQE`发送一个完成信号，但`IB`也允许应用程序关闭指定的`WQE`的完成信号。注意：每隔`post n`个关闭信号的`WQE`，就要`post`一个开启完成信号的`WQE`。因为只有产生`CQE`（Completion Queue Entry），程序去读取了`CQE`之后才会清理发送队列`SQ`（Send Queue）的`SQE`（Send Queue Element）。如果一直没有`CQE`产生，则读取不到`CQE`，也就不会清理发送队列`SQ`，很快发送队列`SQ`就会撑满。
 关闭`Completion`可以减少`NIC`对`CQE`的`DMA writes`。此外，应用程序轮询更少的`CQE`，从而减少了开销。
+
+更详细的参考后文的：[发送队列的头尾指针更新过程](#如果sq_sig_all=0，每隔 N 个请求设置一次IBV_SEND_SIGNALED，发送队列的头尾指针更新过程)
 
 #### 与 IB 网卡同 NUMA
 
@@ -995,38 +997,36 @@ root@vcjob-3937-mpimaster-0:/sys/class/pci_bus/0000:41/device# cat numa_node
 
 ## ibv_send_flags
 
-`enum ibv_send_flags` 是 RDMA（远程直接内存访问）中用于控制发送请求行为的关键标志集合，具体作用如下：
+DeepSeek 总结
 
-1. **IBV_SEND_FENCE**
-
-- **作用**：确保操作顺序性。标记该请求后，需等待之前所有未完成的 RDMA 操作（如 Read/Atomic）完成后才会执行当前请求[6](https://blog.csdn.net/qq_38158479/article/details/130228679)[8](https://www.imspm.com/dev/301802.html)。
-- **使用场景**：用于需要严格顺序的原子操作（如 Read-Modify-Write），避免数据竞争。
-
-2. **IBV_SEND_SIGNALED**
-
-- **作用**：控制是否生成完成事件（Work Completion, WC）。若设置，请求处理完成后会在完成队列（CQ）中生成 WC；若不设置，则无 WC（称为“静默完成”）[2](https://www.ctyun.cn/zhishi/p-500510)[5](https://blog.csdn.net/weixin_42319496/article/details/121125377)[11](https://blog.csdn.net/weixin_42319496/article/details/121126235)。
-- **优化意义**：减少 WC 数量可降低 CPU 轮询开销，但需每隔 N 个请求设置一次 SIGNALED，避免发送队列阻塞[2](https://www.ctyun.cn/zhishi/p-500510)。
-
-3. **IBV_SEND_SOLICITED**
-
-- **作用**：通知接收端立即处理该请求。接收端会为带有此标志的请求生成即时完成事件，而非等待缓冲区填满。
-- **适用场景**：用于关键小数据（如控制信号），减少延迟。
-
-4. **IBV_SEND_INLINE**
-
-- **作用**：将数据直接嵌入工作请求（WQE），而非通过 DMA 从用户缓冲区读取。CPU 直接将数据写入网卡缓冲区，无需内存注册（L_Key 检查被跳过）[2](https://www.ctyun.cn/zhishi/p-500510)[5](https://blog.csdn.net/weixin_42319496/article/details/121125377)[7](https://blog.csdn.net/qq_38158479/article/details/128975872)。
-
-- 优势与限制
-
-  ：
-
-  - 优势：减少 DMA 操作，提升小数据性能；数据可立即重用。
-  - 限制：仅支持 `IBV_WR_SEND` 和 `IBV_WR_RDMA_WRITE` 操作；数据大小受硬件限制（通常 ≤ 256B）。
-
-5. **IBV_SEND_IP_CSUM**
-
-- **作用**：指示网卡硬件计算 IP 数据包的校验和，卸载 CPU 计算负担。
-- **适用场景**：需发送 IP 协议数据时（如 RoCE 网络），提升吞吐量。
+> `enum ibv_send_flags` 是 RDMA（远程直接内存访问）中用于控制发送请求行为的关键标志集合，具体作用如下：
+>
+> 1. - **IBV_SEND_FENCE**
+>
+> - **作用**：确保操作顺序性。标记该请求后，需等待之前所有未完成的 RDMA 操作（如 Read/Atomic）完成后才会执行当前请求。
+> - **使用场景**：用于需要严格顺序的原子操作（如 Read-Modify-Write），避免数据竞争。
+>
+> 2. **IBV_SEND_SIGNALED**
+>
+> - **作用**：控制是否生成完成事件（Work Completion, WC）。若设置，请求处理完成后会在完成队列（CQ）中生成 WC；若不设置，则无 WC（称为“静默完成”）。
+> - **优化意义**：减少 WC 数量可降低 CPU 轮询开销，但需每隔 N 个请求设置一次 SIGNALED，避免发送队列阻塞。
+>
+> 3. **IBV_SEND_SOLICITED**
+>
+> - **作用**：通知接收端立即处理该请求。接收端会为带有此标志的请求生成即时完成事件，而非等待缓冲区填满。
+> - **适用场景**：用于关键小数据（如控制信号），减少延迟。
+>
+> 4. **IBV_SEND_INLINE**
+>
+> - **作用**：将数据直接嵌入工作请求（WQE），而非通过 DMA 从用户缓冲区读取。CPU 直接将数据写入网卡缓冲区，无需内存注册（L_Key 检查被跳过）。
+> - 优势与限制
+>   - 优势：减少 DMA 操作，提升小数据性能；数据可立即重用。
+>   - 限制：仅支持 `IBV_WR_SEND` 和 `IBV_WR_RDMA_WRITE` 操作；数据大小受硬件限制（通常 ≤ 256B）。
+>
+> 5. **IBV_SEND_IP_CSUM**
+>
+> - **作用**：指示网卡硬件计算 IP 数据包的校验和，卸载 CPU 计算负担。
+> - **适用场景**：需发送 IP 协议数据时（如 RoCE 网络），提升吞吐量。
 
 综合应用示例
 
