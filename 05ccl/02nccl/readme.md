@@ -143,6 +143,245 @@ static ncclResult_t createListenSocket(int *fd, union socketAddress *localAddr) 
 
 https://blog.csdn.net/KIDGIN7439/article/details/126712106
 
+## bootstrap网络连接的建立
+
+rank0节点执行ncclGetUniqueId生成ncclUniqueId，通过mpi将Id广播到所有节点，然后所有节点都会执行ncclCommInitRank，这里其他节点也会进行初始化bootstrap网络和通信网络的操作，然后会执行到ncclCommInitRankSync----->initTransportsRank
+
+```c
+static ncclResult_t initTransportsRank(struct ncclComm* comm, ncclUniqueId* commId) {
+  // We use 3 AllGathers
+  // 1. { peerInfo, comm }
+  // 2. ConnectTransport[nranks], ConnectValue[nranks]
+  // 3. { nThreads, nrings, compCap, prev[MAXCHANNELS], next[MAXCHANNELS] }
+ 
+  int rank = comm->rank;
+  int nranks = comm->nRanks;
+  uint64_t commHash = getHash(commId->internal, NCCL_UNIQUE_ID_BYTES);
+  TRACE(NCCL_INIT, "comm %p, commHash %lx, rank %d nranks %d - BEGIN", comm, commHash, rank, nranks);
+  NCCLCHECK(bootstrapInit(commId, rank, nranks, &comm->bootstrap)); // 初始化
+ 
+  // AllGather1 - begin
+  struct {
+    struct ncclPeerInfo peerInfo;
+    struct ncclComm* comm;
+  } *allGather1Data;
+    
+    /***
+    // ncclPeerInfo是rank的一些基本信息，比如rank号，在哪个机器的哪个进程等
+struct ncclPeerInfo {
+  int rank;
+  int cudaDev;
+  int gdrSupport;
+  uint64_t hostHash;
+  uint64_t pidHash;
+  dev_t shmDev;
+  int64_t busId; 
+  // busId并不是指的总线号，指的其实是定位一个PCIe设备用到的id，即BDF(bus + device + function)，
+  // 一个bus上有多个设备，一个设备有多个功能，因此通过BDF就可以定位一个设备，
+  // 在机器启动完成PCIe的配置之后会将相关信息通过sysfs提供给用户，NCCL就是通过sysfs来完成拓扑检测的
+};
+	下文通过 bootstrapAllGather 交换所有rank的 ncclPeerInfo 信息，使每一个rank 进程拥有所以其它rank的基本信息。
+    */
+  NCCLCHECK(ncclCalloc(&allGather1Data, nranks));
+  allGather1Data[rank].comm = comm;
+  struct ncclPeerInfo* myInfo = &allGather1Data[rank].peerInfo;
+  NCCLCHECK(fillInfo(comm, myInfo, commHash));
+  NCCLCHECK(bootstrapAllGather(comm->bootstrap, allGather1Data, sizeof(*allGather1Data)));
+ 
+  NCCLCHECK(ncclCalloc(&comm->peerInfo, nranks+1)); // Extra rank to represent CollNet root
+  for (int i = 0; i < nranks; i++) {
+    memcpy(comm->peerInfo+i, &allGather1Data[i].peerInfo, sizeof(struct ncclPeerInfo));
+    if ((i != rank) && (comm->peerInfo[i].hostHash == myInfo->hostHash) && (comm->peerInfo[i].busId == myInfo->busId)) {
+      WARN("Duplicate GPU detected : rank %d and rank %d both on CUDA device %x", rank, i, myInfo->busId);
+      return ncclInvalidUsage;
+    }
+  }
+```
+
+![image-20250319000950190](./assets/readme/image-20250319000950190.png)
+
+原文链接：https://blog.csdn.net/KIDGIN7439/article/details/126938077
+
+
+
+##  机器内拓扑分析
+
+bootstrap网络建立时通过 allGather1Data 获取了所有rank的 ncclPeerInfo信息，此时allGather1Data，包含当前卡的rank，[PCIe](https://so.csdn.net/so/search?q=PCIe&spm=1001.2101.3001.7020) busId，/dev/shm的设备号、是否支持GDR等。
+
+根据每个rank的bdf，可以完成拓扑检测的。通过sysfs将gpu和网卡对应的pci树结构建立出来了xml树
+
+## 建图过程
+
+上次分析到nccl对机器PCI系统进行拓扑分析的过程，产出的结果为xml格式，接下来，nccl会根据这个xml进图的建立过程以便之后进行路径搜索。
+
+ncclTopoGetSystem的最后会执行ncclTopoGetSystemFromXml将xml格式转成图格式。
+
+由于拓扑分析产出的xml不便于进行后续的路径搜索，所以本节基于xml对PCI系统进行了建图。
+
+## 路径计算
+
+上节NCCL完成了对机器PCI系统拓扑的建图，其中建好的图如下所示，其中GPU之间是通过NVLink连接起来的
+
+ 为了方便之后的搜索channel，接下来NCCL会先计算GPU和NIC节点到其他任意节点之间的最优路径，以及对应的带宽，即最优路径上所有边的带宽的最小值。
+
+那么抽象一下，这个问题可以建模为给定一个无向图，每条边有一个权值，给定查询(u, v)，求节点u到节点v的路径，使得路径上的最小边的权值最大，类似无向图的最小瓶颈路，可以用生成树+LCA的方法解决；如果查询中的u是固定的，那么也可以使用类似SPFA的方法解决，将松弛方法改一下即可。
+
+其中type为路径的类型，一共有如下几种枚举值
+
+```c
+#define PATH_LOC 0 // 自己
+#define PATH_NVL 1 // 路径上的边都是NVLink
+#define PATH_PIX 2 // 经过最多一个PCIe switch
+#define PATH_PXB 3 // 经过了多个PCIe witch，但是没有经过CPU
+#define PATH_PHB 4 // 经过了CPU
+#define PATH_SYS 5 // 不同numa之间的路径
+#define PATH_NET 6
+```
+
+PATH_LOC为节点到自己，PATH_NVL表示路径上的边都是NVLink，PATH_PIX表示经过最多一个PCIe switch，PATH_PXB表示经过了多个PCIe witch，但是没有经过CPU，PATH_PHB表示经过了CPU，PATH_SYS表示不同numa之间的路径。
+
+原文链接：https://blog.csdn.net/KIDGIN7439/article/details/127849771
+
+## channel 搜索
+
+nccl中channel的概念表示一个通信路径，为了更好的利用带宽和网卡，以及同一块数据可以通过多个channel并发通信，另外后续可以看到一个channel对应了一个GPU SM，所以基于这些原因，nccl会使用多channel，搜索的过程就是搜索出来一组channel。
+
+
+
+看下ncclTopoCompute，这里就是实际搜索channel的过程，目标是搜索出来尽可能多，带宽尽可能大的一系列channel，本质就是暴力搜索，先设置一系列的条件搜答案，如果搜不出来则降低条件继续搜。
+
+由于此时没有NET节点，所以crossNic为0，然后初始化graph，首先设置最高的条件，限制节点内部只能使用不超过PATH_NVL路径，节点间只能使用不超过PATH_PIX的路径，然后通过system-maxWidth设置speedIntra和speedInter，接着执行ncclTopoSearchRec搜索出一个答案存储到tmpGraph中。
+
+如果此时就是最优的结果，channel数等于maxChannel，并且speedInter也等于maxWidth，则直接退出，否则就开始逐步降低条件，比如将sameChannel设置为0，允许channel之间不一样；调大typeIntra和typeInter；允许crossNic；调小speedInter和speedIntra
+
+
+原文链接：https://blog.csdn.net/KIDGIN7439/article/details/128074716
+
+## 机器间channel连接
+
+上节中完成了单机内部的channel搜索，仍然以ringGraph为例的话，相当于在单台机器内部搜索出来了一系列的环，接下来需要将机器之间的环连接起来。
+
+为了方便理解假设两机十六卡的情况下第一台机器的一个ring为：
+
+    graph->intra: GPU/0 GPU/7 GPU/6 GPU/3 GPU/2 GPU/5 GPU/4 GPU/1
+    graph->inter: NET/0 NET/0
+
+第二个机器对应的ring为：
+
+    graph->intra: GPU/10 GPU/9 GPU/8 GPU/13 GPU/12 GPU/15 GPU/14 GPU/11
+    graph->inter: NET/0 NET/0
+
+allGather3Data用于rank间聚合channel的信息，ncclGraphInfo记录了环的信息，比如speed和type.
+
+然后通过bootstrapAllGather获取全局的allGather3Data信息，计算出当前rank所在的node保存在comm->node，以及每个node的第一个rank保存在nodesFirstRank，因此例子中：
+
+    nodesFirstRank[0]: 0
+    nodesFirstRank[1]: 10
+
+然后开始将每个机器的环首尾相连组成大环。
+
+原文链接：https://blog.csdn.net/KIDGIN7439/article/details/128144057
+
+## 数据通信链路transport的建立
+
+上节以ringGraph为例介绍了机器间channel的连接过程，现在环里每个rank都知道了从哪个rank接收数据以及将数据发送给哪个rank，本节具体介绍下[P2P](https://so.csdn.net/so/search?q=P2P&spm=1001.2101.3001.7020)和rdma NET场景下数据通信链路的建立过程。
+
+nccl现共有三个transport，P2P通过卡间p2p通信，SHM通过机器内共享的host内存通信，NET通过网络通信，nccl会依次通过这三个transport的canConnect判断是否可用，然后选择第一个可用的。
+
+这里涉及到 IB 的连接
+
+## 单机内ncclSend和ncclRecv的过程
+
+单机内的通信都是通过kernel来进行的，所以整个通信的过程可以分为两步，第一步是准备kernel相关的参数，第二步是实际执行kernel的过程。
+
+![image-20250319012609995](./assets/readme/image-20250319012609995.png)
+
+最下边send0和recv0表示用户为rank0准备的数据buffer。
+
+之前在建立ringGraph的时候有搜索出一系列的环，并根据这些环建立了channel，假设现在一共有nChannels个channel，而p2p需要p2pnChannels个channel，那么如果p2pnChannels大于nChannles，会再创建p2pnChannels - nChannels个channel，其他的复用；否则直接复用即可。
+
+对于每个send/recv操作，会使用p2pnChannelsPerPeer个channel并行发送/接收，那么当p2pnChannelsPerPeer比较小，p2pnChannels比较大，会导致只用了前边的几个channel，无法充分利用所有的channel，举个例子，p2pnChannelsPerPeer = 2，p2pnChannels = 32，rank0和rank1，rank2的通信都会使用channel[1]和channel[2]， 为了解决这个问题，nccl使用数组p2pChannels[p2pnChannelsPerPeer]作为偏移，比如p2pChannels[0] = 0, p2pChannels[1] = 16，那么rank0和rank1的通信会使用channel[1]和channel[17]，rank0和rank2的通信会使用channel[2]和channel[18]，更充分的利用了channel。
+
+为了方便理解，后续举例时假定p2pnChannels和p2pnChannelsPerPeer都为1。
+
+然后我们来看下刚刚提到的这些变量都是干嘛的，在p2p transport的setup阶段，即第八节中讲的，每个rank都创建了用于协调发送接收过程的变量，如下所示，由于支持p2p read，所以buff位于发送端；tail位于接收端，发送端和接收端共同持有，由发送端更新，head位于发送端，发送端和接收端共同持有，由接收端进行更新；在ncclPrimitives的接收端，tail叫做recvConnTailPtr，head叫做recvConnHeadPtr；而在发送端，tail叫做sendConnTailPtr，head叫做sendConnHeadPtr。
+![image-20250319013707410](./assets/readme/image-20250319013707410.png)
+
+ 然后看下这些变量是如何协调发送接收过程的
+![image-20250319013716853](./assets/readme/image-20250319013716853.png)
+
+中间黄色的框就是图四里标的buff，整个buff被划分为NCCL_STEP块，图五只画出来六块。
+
+sendConnHead，sendConnTailPtr，sendStep由发送端更新，每次发送都会加一，这几个值其实是相等的（所以感觉这几个变量有些冗余）。
+
+recvConnTail，recvConnHeadPtr，recvStep由接收端更新，每次接收都会加一，这几个值其实是相等的。
+
+
+到这里基本就完成了单机内部ncclSend/ncclRecv的过程，主要就是两步，先通过peerlist将用户的操作记录下来，根据记录生成kernel所需要的参数，然后启动kernel执行拷贝即可。**对于不同卡的情况**，send将数据从用户指定的sendbuff拷贝到nccl p2p transport的buff，recv将数据从buff拷贝到用户指定的recvbuff，**buff在这里其实就是一个fifo，nccl通过head，tail指针来完成对发送和接收过程的协调**；**对于同卡的情况**直接通过kernel将数据从sendbuff拷贝到recvbuff即可。
+
+
+原文链接：https://blog.csdn.net/KIDGIN7439/article/details/128326053
+
+## 多机间ncclSend和ncclRecv的过程
+
+多机间网络通信的过程是由独立的proxy线程执行的，ncclProxyArgs保存了通信需要的参数，proxy线程会根据这些args执行相应的通信流程。然后执行SaveProxy。
+
+![image-20250319014141034](./assets/readme/image-20250319014141034.png)
+
+ncclProxyArgs被组织成图一分层的链式结构，comm中的proxyState->ops为第一层的第一个args，图中纵向的一列表示在同一个connector上边的所有args，第一层（黄色框）为该connector的第一个args，第二层（绿色框）为该connector的第二个args，层间通过next_peer指针索引；一行就是所有connector的对应位置的args，层内通过next指针索引。
+
+当有ProxyArgs被添加进来并唤醒proxy线程之后，proxy线程就开始执行图一的第一层args，拿到第一个args op，然后执行op的progress函数，对于send场景，progress就是netTransport的netSendProxy，receive就是netRecvProxy。执行op的progress之后遍历到下一个args next，如果next的状态不是ncclProxyOpNone，表示next还没有执行结束，那么将op设置为next，下一次将会执行next；如果状态为ncclProxyOpNone，表示next已经执行完成，那么需要将next从args链中去除，这个时候尝试将next的next_peer替换next，如果next没有next_peer，那么直接将next从第一层链中删除，否则将next_peer提到第一层链来替换next。
+
+首先看下send端的proxy线程和kernel是如何协作的，类似单机内部send和recv之间的队列，proxy和kernel间也是通过这种生产者消费者队列来协调的，整体结构如下图所示
+
+![image-20250319014804087](./assets/readme/image-20250319014804087.png)
+
+核心就是队列的head，tail和SizesFifo，通信过程中的buf，这些都会保存到connector的conn中。对于kernel端，当执行了loadSendConn和loadSendSync之后kernel就持有了ncclConnector的变量，如图二左侧框
+
+对于proxy线程，ncclConnector被保存到了ncclProxyArgs中，所以proxy也可以拿到这些变量，如图二的右侧框。
+
+![image-20250319014912329](./assets/readme/image-20250319014912329.png)
+
+对于kernel端，过程和单机一致，在搬运数据之前，通过判断sendConnHeadPtr和sendConnTailPtr之间的距离来判断队列是否已满，注意这里sendConnHead其实是sendConnTailPtr。然后将数据长度写入到sendConnFifoPtr中，即sizesFifo，这样proxy就能知道这次写的数据的长度。
+
+![image-20250319014959039](./assets/readme/image-20250319014959039.png)
+
+recvTail由kernel更新，表示kernel端产生了这么多的数据，head由proxy更新，表示proxy完成了这些数据的发送；由于proxy使用异步发送，所以引入了tail变量，head和tail之间的数据为proxy执行了异步发送，但还没确定发送完成，tail和recvTail之间为proxy还没有执行发送的数据。
+
+具体看下，proxy拿到一个新的ncclProxyArgs args（state为ncclProxyOpReady）之后，首先计算head，tail和end，其中head和tail表示队列的首尾，end表示完成当前这个args的数据发送一共需要多少步，然后状态转变为ncclProxyOpProgress.
+
+单机过程中的队列其实是逻辑的，并没有实际分配一个队列，多机这里可以将sizesFifo理解为实际分配的队列，fifo中每一项代表了这块数据的长度，可以看到proxy在拿到fifo对应项之后直接通过ncclNetIsend执行数据的发送过程。
+
+如果head小于tail，说明有执行了异步发送的请求，通过ncclNetTest判断是否发送完成，如果发送完成了，那么更新head。最后如果head等于end，说明这个args执行完成了，将state转为ncclProxyOpNone。
+
+最后总结下多机通信的整体流程:
+
+- 通信由kernel和proxy线程协调完成，send端kernel负责将数据从input搬运到buf，proxy线程负责将buf中数据通过网络发送给recv端
+- kernel和proxy间通过队列实现生产者消费者模式
+- send端通过rdma send发送数据，和recv端通过队列实现生产者消费者模式，队列位于send端，recv端每次下发一个wr到rq之后会执行rdma write通知send端
+
+
+
+原文链接：https://blog.csdn.net/KIDGIN7439/article/details/130936177
+
+## double binary tree
+
+上节我们以ring allreduce为例看到了集合通信的过程，但是随着训练任务中使用的gpu个数的扩展，ring allreduce的延迟会线性增长，为了解决这个问题，NCCL引入了tree算法，即double binary tree。
+double binary tree
+
+朴素的tree算法将所有机器节点构造成一棵二叉树，支持broadcast，reduce，前缀和。假设root节点要broadcast一个消息M给所有节点，root会将M发送给他的子节点，其他所有的节点收到消息M后再发送给子节点，叶节点因为没有子节点，所以叶结点只会接收M。这个过程可以将M切分为k个block，从而可以流水线起来。
+
+但这个朴素算法有一个问题，叶节点只接收数据，不发送，因此只利用了带宽的一半，为了解决这个问题，MPI提出了double binary tree算法，假设一共有N个节点，MPI会构建两个大小为N的树T1和T2，T1的中间节点在T2中是叶节点，T1和T2同时运行，各自负责消息M的一半，这样每个节点的双向带宽可以都被利用到。以十台机器为例，构建出的结构如下：
+
+![image-20250319015851072](./assets/readme/image-20250319015851072.png)
+
+**ring和tree的选择**：
+
+主体思想很简单，对于用户传入的nBytes长度数据，总耗时time = latency + nBytes / algo_bw，其中algo_bw为算法带宽，基础总线带宽为busBw，就是每个channel的带宽乘channel数，然后会根据实测的数据对带宽进行一些修正，比如tree场景会乘0.9。然后计算算法带宽，tree的话会除以2，因为上行一次，下行一次相当于发送了两倍的数据量，ring的话会除以2 * (nranks - 1) / nranks，原因见第十一节。latency计算不再赘述，最后将计算出的每种协议和算法的带宽延迟保存到bandwidths和latencies。
+当用户执行allreduce api的时候会通过getAlgoInfo计算出每种算法和协议组合的执行时间，选出最优的。
+
+原文链接：https://blog.csdn.net/KIDGIN7439/article/details/135102930
+
 ## [NCCL Protocol](https://zhuanlan.zhihu.com/p/699178659)
 
 ### Simple协议
