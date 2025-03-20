@@ -101,17 +101,17 @@ DeepSeek 总结:
 
 | **特性**     | **LID（IB）**                                                | **LID（RoCE）**                                              |
 | ------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| **存在性**   | 核心概念：IB网络中必须存在LID，用于二层本地寻址[3](https://blog.csdn.net/asterfusion/article/details/143573475)[6](https://blog.csdn.net/yuzhangfeng/article/details/132425617)。IB独有的概念，位于链路层。 | **无LID**：RoCE基于以太网协议栈，链路层使用MAC地址，无LID概念[3](https://blog.csdn.net/asterfusion/article/details/143573475)[4](https://www.toutiao.com/article/7434038965022835212/)。 |
-| **分配方式** | 由IB子网管理器（SM）动态分配，16位整数标识[3](https://blog.csdn.net/asterfusion/article/details/143573475)[6](https://blog.csdn.net/yuzhangfeng/article/details/132425617)。 | 不适用                                                       |
-| **作用范围** | 仅在IB子网内有效，跨子网需结合GRH（Global Routing Header）[3](https://blog.csdn.net/asterfusion/article/details/143573475)。 | 不适用                                                       |
+| **存在性**   | 核心概念：IB网络中必须存在LID，用于二层本地寻址。IB独有的概念，位于链路层。 | **无LID**：RoCE基于以太网协议栈，链路层使用MAC地址，无LID概念。 |
+| **分配方式** | 由IB子网管理器（SM）动态分配，16位整数标识。                 | 不适用                                                       |
+| **作用范围** | 仅在IB子网内有效，跨子网需结合GRH（Global Routing Header）。 | 不适用                                                       |
 
 **GID在IB与RoCE中的区别**
 
 | **特性**     | **GID（IB）**                                                | **GID（RoCE）**                                              |
 | ------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| **定义方式** | 由IB子网前缀（64位）和端口的GUID（64位）组合生成，标识全局唯一性[3](https://blog.csdn.net/asterfusion/article/details/143573475)[6](https://blog.csdn.net/yuzhangfeng/article/details/132425617)，位于IB网络层。 | 基于IP地址映射生成： • **RoCEv1**：基于MAC地址+VLAN生成GID[3](https://blog.csdn.net/asterfusion/article/details/143573475)[4](https://www.toutiao.com/article/7434038965022835212/)。 • **RoCEv2**：直接对应IPv4/IPv6地址[3](https://blog.csdn.net/asterfusion/article/details/143573475)[4](https://www.toutiao.com/article/7434038965022835212/)，在RoCEv2中，GID位于以太网TCP/IP协议栈的UDP层，对应IPv6地址。 |
-| **路由能力** | 依赖IB子网管理器和GRH实现跨子网路由[3](https://blog.csdn.net/asterfusion/article/details/143573475)[6](https://blog.csdn.net/yuzhangfeng/article/details/132425617)。 | **RoCEv2支持三层路由**：通过IP地址实现跨子网通信，无需依赖子网管理器[3](https://blog.csdn.net/asterfusion/article/details/143573475)[4](https://www.toutiao.com/article/7434038965022835212/)。 |
-| **封装协议** | 通过IB的GRH（Global Routing Header）携带GID[3](https://blog.csdn.net/asterfusion/article/details/143573475)。 | **RoCEv2**：GID封装在IP+UDP头中，UDP目标端口固定为4791[3](https://blog.csdn.net/asterfusion/article/details/143573475)[4](https://www.toutiao.com/article/7434038965022835212/)。 |
+| **定义方式** | 由IB子网前缀（64位）和端口的GUID（64位）组合生成，标识全局唯一性，位于IB网络层。 | 基于IP地址映射生成： • **RoCEv1**：基于MAC地址+VLAN生成GID。 • **RoCEv2**：GID位于以太网TCP/IP协议栈的UDP层，对应IPv4/IPv6地址。 |
+| **路由能力** | 依赖IB子网管理器和GRH实现跨子网路由。                        | **RoCEv2支持三层路由**：通过IP地址实现跨子网通信，无需依赖子网管理器。 |
+| **封装协议** | 通过IB的GRH（Global Routing Header）携带GID。                | **RoCEv2**：GID封装在IP+UDP头中，UDP目标端口固定为4791。     |
 
 ### RoCE编程中的常见错误
 
