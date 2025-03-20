@@ -291,6 +291,7 @@ GDRCopy 是一个基于 GPUDirect RDMA 技术的低延迟 GPU 内存拷贝库，
 
 - [Machine Learning Frameworks Interoperability, Part 2: Data Loading and Data Transfer Bottlenecks](https://developer.nvidia.com/blog/machine-learning-frameworks-interoperability-part-2-data-loading-and-data-transfer-bottlenecks/)
 - [Enable faster memory transfers between CPU and GPU with GDRCopy](https://developer.nvidia.com/gdrcopy)
+- [Accelerating IO in the Modern Data Center: Network IO](https://developer.nvidia.com/blog/accelerating-io-in-the-modern-data-center-network-io/)
 
 
 
