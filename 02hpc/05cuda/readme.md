@@ -272,7 +272,7 @@ GPU中每个SM都能支持数百个线程并发执行，每个GPU通常有多个
 - **线程协作与数据共享需求**：
    Block 内的线程通过共享内存（Shared Memory）和同步机制（如 `__syncthreads()`）协作。若 Block 被拆分到多个 SM，共享内存将无法跨 SM 访问，导致数据一致性问题。
 - **CUDA 架构设计原则**：
-   CUDA 的线程模型要求 Block 在逻辑上独立，其执行不依赖其他 Block。这种设计简化了调度逻辑并保证并行效率
+   CUDA 的线程模型要求 Block 在逻辑上独立，其执行不依赖其他 Block。这种设计简化了调度逻辑并保证并行效率。
 
 若 Block 消耗的资源过多，则Block 无法加载。
 
@@ -653,7 +653,7 @@ __global__ void kernel(int *data) {
 
 本地内存是存储在每个线程本地的内存，通常由编译器自动分配。当寄存器不足时，一些变量可能被存储在本地内存中。
 
-“本地内存”这一名词是有歧义的：溢出到本地内存中的变量本质上与全局内存在同一块存储区域，因此本地内存访问的特点是高延迟和低带宽。
+“本地内存”这一名词是有歧义的：**溢出到本地内存中的变量本质上与全局内存在同一块存储区域，因此本地内存访问的特点是高延迟和低带宽。**
 
 #### 共享内存（Shared Memory）
 
@@ -698,7 +698,7 @@ cudaError_t cudaMemcpyToSymbol(const void* symbol,const void *src,size_t count);
 
 ### GPU缓存
 
-跟CPU缓存一样，GPU缓存是不可编程的内存。在GPU上有4种缓存：
+**跟CPU缓存一样，GPU缓存是不可编程的内存**。在GPU上有4种缓存：
 
 - 一级缓存
 
@@ -708,7 +708,7 @@ cudaError_t cudaMemcpyToSymbol(const void* symbol,const void *src,size_t count);
 
 - 只读纹理缓存
 
-每个SM都有一个一级缓存，所有的SM共享一个二级缓存。一级和二级缓存都被用来在存储本地内存和全局内存中的数据，也包括寄存器溢出的部分。对Fermi GPU和KeplerK40或其后发布的GPU来说，CUDA允许我们配置读操作的数据是使用一级和二级缓存，还是只使用二级缓存。
+**每个SM都有一个一级缓存，所有的SM共享一个二级缓存**。一级和二级缓存都被用来在存储本地内存和全局内存中的数据，也包括寄存器溢出的部分。对Fermi GPU和KeplerK40或其后发布的GPU来说，CUDA允许我们配置读操作的数据是使用一级和二级缓存，还是只使用二级缓存。
 
 在CPU上，内存的加载和存储都可以被缓存。但是，在GPU上只有内存加载操作可以被缓存，内存存储操作不能被缓存。
 
@@ -796,6 +796,8 @@ cudaError_t cudaFreeHost(void *ptr)
 
 ### 零拷贝内存
 
+零拷贝内存是固定内存的一种特殊形式，通过 `cudaHostAlloc` 分配时设置 `cudaHostAllocMapped` 标志，**主机内存直接映射到设备地址空间**，允许设备直接访问主机内存，避免显式数据传输。适用于设备需频繁访问少量主机数据，或主机与设备共享数据的场景。
+
 GPU线程可以直接访问零拷贝内存，这部分内存在主机内存里面，CUDA核函数使用零拷贝内存有以下几种情况：
 
 - 当设备内存不足的时候可以利用主机内存
@@ -812,9 +814,9 @@ cudaError_t cudaHostAlloc(void **ptr, size_t size, unsigned int flags);
 
 **特点**：除了分配页锁定内存外，还可以通过 `flags` 参数指定内存的属性，例如：
 
-- `cudaHostAllocDefault`：默认行为，与 `cudaMallocHost` 相同。即 `cudaMallocHost` 是 `cudaHostAlloc` 中的一个默认的行为。
+- `cudaHostAllocDefault`：默认行为，与 `cudaMallocHost` 相同。即 `cudaMallocHost` 是 `cudaHostAlloc` 中的一个默认的行为（固定内存）。
 - `cudaHostAllocPortable`：分配的内存可以被所有 CUDA 上下文使用。
-- `cudaHostAllocMapped`：分配的内存可以映射到设备地址空间，从而可以直接从 GPU 访问。
+- `cudaHostAllocMapped`：分配的内存可以映射到设备地址空间，从而可以直接从 GPU 访问（零拷贝内存）。
 - `cudaHostAllocWriteCombined`：分配写合并内存，适合主机写、设备读的场景。
 
 - 提供了更灵活的内存分配方式，适合需要特殊内存属性的场景。
