@@ -207,6 +207,79 @@ hca_id: rocep101s0f1
 
 当前的机器 IP 是 192.168.99.100，根据 “ GID[  2]:               ::ffff:192.168.99.100, RoCE v2” 也可以知道该机器的 gid_idx = 2
 
+### 为 RoCEv2 网卡配置 IPv4 地址
+
+```shell
+# 查看 GID 相关的信息，发现只有 GID[0]，与 IPv6 地址绑定
+$ ibv_devinfo -v | grep "GID" -A 5
+			GID[  0]:		fe80::6eb3:11ff:fe79:76f4, RoCE v2
+
+hca_id:	rocep39s0f1
+	transport:			InfiniBand (0)
+	fw_ver:				1.73
+	node_guid:			6eb3:11ff:fe79:76f5
+--
+			GID[  0]:		fe80::6eb3:11ff:fe79:76f5, RoCE v2
+```
+
+ifconfig 查看的 ens1f0 只有 IPv6 的地址
+
+```shell
+$ ifconfig
+# 其它网卡信息略
+ens1f0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet6 fe80::6eb3:11ff:fe79:76f4  prefixlen 64  scopeid 0x20<link>
+        ether 6c:b3:11:79:76:f4  txqueuelen 1000  (Ethernet)
+        RX packets 567  bytes 429049 (429.0 KB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 498  bytes 391456 (391.4 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+```
+
+配置 IPv4 地址
+
+```shell
+$ sudo ip addr add 192.168.90.218/24 dev ens1f0
+$ sudo ip link set ens1f0 up
+$ ip addr show ens1f0
+3: ens1f0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
+    link/ether 6c:b3:11:79:76:f4 brd ff:ff:ff:ff:ff:ff
+    altname enp39s0f0
+    inet 192.168.90.218/24 scope global ens1f0
+       valid_lft forever preferred_lft forever
+    inet6 fe80::6eb3:11ff:fe79:76f4/64 scope link 
+       valid_lft forever preferred_lft forever
+```
+
+再次查看，可以发现，ens1f0 确实增加了一行 IPv4地址，且 多了一行 GID[  1]:		::ffff:192.168.90.218, RoCE v2
+
+```shell
+$ ifconfig
+# 其它网卡信息略
+ens1f0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 192.168.90.218  netmask 255.255.255.0  broadcast 0.0.0.0
+        inet6 fe80::6eb3:11ff:fe79:76f4  prefixlen 64  scopeid 0x20<link>
+        ether 6c:b3:11:79:76:f4  txqueuelen 1000  (Ethernet)
+        RX packets 586  bytes 436098 (436.0 KB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 506  bytes 394096 (394.0 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+
+$ ibv_devinfo -v | grep "GID" -A 5
+			GID[  0]:		fe80::6eb3:11ff:fe79:76f4, RoCE v2
+			GID[  1]:		::ffff:192.168.90.218, RoCE v2
+
+hca_id:	rocep39s0f1
+	transport:			InfiniBand (0)
+	fw_ver:				1.73
+	node_guid:			6eb3:11ff:fe79:76f5
+--
+			GID[  0]:		fe80::6eb3:11ff:fe79:76f5, RoCE v2
+```
+
+
+
 ## 参考
 
 - [ROCE技术深度解析](https://www.bilibili.com/video/BV1GPaseFEwD?spm_id_from=333.788.recommend_more_video.0&vd_source=2d2ac911095577ab30d116171d315a7c)
