@@ -1150,6 +1150,16 @@ struct ibv_send_wr wr = {
 
 ## RDMA 环境部署
 
+#### 使用 OFED 包安装 IB 驱动
+
+```shell
+sudo mkdir /mnt/ofed
+sudo mount -o ro,loop MLNX_OFED_LINUX-24.10-2.1.8.0-ubuntu20.04-x86_64.iso  /mnt/ofed
+cd /mnt/ofed
+sudo ./mlnxofedinstall --force
+sudo /etc/init.d/openibd restart
+```
+
 ### 安装 rdma 依赖包
 
 ```shell
