@@ -31,17 +31,17 @@ RoCEv2 是基于无连接协议的UDP 协议，相比面向连接的 TCP 协议�
 
 需要安装MFT工具 [Firmware for ConnectX®-5 VPI (nvidia.com)](https://network.nvidia.com/support/firmware/connectx5ib/)，完了后就可以做切换步骤：
 
-1. mst start
-2. mst status 获取 mst devices
-3. 查询当前端口信息：mlxconfig -d /dev/mst/<mst_dev> q | grep LINK_TYPE_
-4. 切换模式：mlxconfig -d /dev/mst/<mst_dev> set LINK_TYPE_P1=2
+1. sudo mst start
+2. sudo mst status 获取 mst devices
+3. 查询当前端口信息：sudo mlxconfig -d /dev/mst/<mst_dev> q | grep LINK_TYPE_
+4. 切换模式：sudo mlxconfig -d /dev/mst/<mst_dev> set LINK_TYPE_P1=2
 
 ![img](assets/roce/wps2.jpg) 
 
 #### 查看当前端口等信息
 
 ```shell
-mlxconfig -d /dev/mst/<mst_dev> q | grep LINK_TYPE_
+sudo mlxconfig -d /dev/mst/<mst_dev> q | grep LINK_TYPE_
 
 # LINK_TYPE_P1 IB(1) 
 # 1是指ib模式，2是指eth模式

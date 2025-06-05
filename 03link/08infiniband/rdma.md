@@ -1157,6 +1157,9 @@ sudo mkdir /mnt/ofed
 sudo mount -o ro,loop MLNX_OFED_LINUX-24.10-2.1.8.0-ubuntu20.04-x86_64.iso  /mnt/ofed
 cd /mnt/ofed
 sudo ./mlnxofedinstall --force
+# 或者
+sudo ./mlnxofedinstall --add-kernel-support --force # 支持 DEVX 扩展，目前在 ConnectX-6 网卡
+# sudo ./mlnxofedinstall --force --add-kernel-support --without-dkms --with-mft # 在重装系统后的 20.04 机器上，可以安装成功
 sudo /etc/init.d/openibd restart
 ```
 
