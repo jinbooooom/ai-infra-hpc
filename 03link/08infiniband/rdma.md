@@ -275,7 +275,9 @@ Doorbell有两种实现机制：
 
 ## 拥塞控制
 
-DCQCN
+IB 的流控基于 Credit-Based Flow Control，https://zhuanlan.zhihu.com/p/13570387086 简单介绍了
+
+DCQCN 原理参考 https://www.cnblogs.com/burningTheStar/p/8566746.html
 
 **RoCEv2**：
 
