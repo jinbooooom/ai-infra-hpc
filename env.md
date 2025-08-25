@@ -42,3 +42,36 @@ sduo dpkg -i *.deb
 ```
 
 ![image-20250825092749333](assets/env/image-20250825092749333.png)
+
+```shell
+# 测试 gdrcopy
+gdrcopy_sanity # 测试所有
+gdrcopy_copybw # 带宽测试
+gdrcopy_copylat # 延迟测试
+
+# 一个例子
+$ gdrcopy_copybw 
+GPU id:0; name: NVIDIA A100-PCIE-40GB; Bus id: 0000:99:00
+GPU id:1; name: NVIDIA A100-PCIE-40GB; Bus id: 0000:d1:00
+selecting device 0
+testing size: 131072
+rounded size: 131072
+gpu alloc fn: cuMemAlloc
+device ptr: 7efd29200000
+map_d_ptr: 0x7efd347e2000
+info.va: 7efd29200000
+info.mapped_size: 131072
+info.page_size: 65536
+info.mapped: 1
+info.wc_mapping: 1
+page offset: 0
+user-space pointer:0x7efd347e2000
+writing test, size=131072 offset=0 num_iters=10000
+write BW: 7268.85MB/s
+reading test, size=131072 offset=0 num_iters=100
+read BW: 462.08MB/s
+unmapping buffer
+unpinning buffer
+closing gdrdrv
+```
+
