@@ -31,11 +31,12 @@ sudo apt-get install -y cuda-drivers
 
 ```shell
 git clone --recursive https://github.com/NVIDIA/gdrcopy.git
-cd gdrcopy/
+cd gdrcopy
 cd packages/
 
 # 编译，生成 deb，一共是 4 个
 CUDA=/usr/local/cuda ./build-deb-packages.sh
+# 如果打包失败，是因为缺少 debuild，可以执行 sudo apt install devscripts
 
 # 安装
 sduo dpkg -i *.deb
