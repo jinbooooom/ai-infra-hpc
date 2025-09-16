@@ -526,6 +526,26 @@ APP在WQE中提供的地址是虚拟地址（Virtual Address，VA），经过MMU
 
   为了防止换页所导致的VA-PA映射关系发生改变，注册MR时会"Pin"住这块内存（亦称“锁页”），即锁定VA-PA的映射关系。也就是说，MR这块内存区域会长期存在于物理内存中不被换页，直到完成通信之后，用户主动注销这片MR。
 
+### 注册 GPU 内存
+
+使用 gdrcopy 获取显存映射在主机侧的地址，然后直接使用 ibv_reg_mr 注册映射后的地址会报错。
+
+注册显存的两种主要方案：
+
+**现代 dmabuf 方案**：通过 CUDA API 获取 dma-buf 文件描述符，然后使用 `ibv_reg_dmabuf_mr` 注册，**优势**：标准化、更好的系统集成性、官方推荐方案。系统要求：
+
+- NVIDIA 驱动：开放变体版本 515+
+- CUDA：11.7+
+- Linux 内核：5.12+（仅针对 NIC 栈）
+
+**传统 peer-direct 方案**：使用 nvidia-peermem/nv_peer_mem 内核模块与 MLNX_OFED 配合，适合较旧的系统环境或不支持 dmabuf 的情况。直接使用 `ibv_reg_mr` 配合已加载的 nvidia-peermem 模块
+
+**优先考虑 dmabuf 方案**，对于无法使用 dmabuf 的情况，传统的 peer-direct 路径仍然可用，但可能需要特定版本的 MLNX_OFED 和 nvidia-peermem 模块支持。
+
+参考：
+
+[call ibv_reg_mr failed using mapped memory #266](https://github.com/NVIDIA/gdrcopy/issues/266)
+
 ## Protection Domain
 
 在RDMA中，PD像是一个容纳了各种资源（QP、MR等）的“容器”，将这些资源纳入自己的保护范围内，避免他们被未经授权的访问。一个节点中可以定义多个保护域，各个PD所容纳的资源彼此隔离，无法一起使用。

@@ -39,7 +39,7 @@ CUDA=/usr/local/cuda ./build-deb-packages.sh
 # 如果打包失败，是因为缺少 debuild，可以执行 sudo apt install devscripts
 
 # 安装
-sduo dpkg -i *.deb
+sudo dpkg -i *.deb
 ```
 
 ![image-20250825092749333](assets/env/image-20250825092749333.png)
