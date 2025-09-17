@@ -532,19 +532,50 @@ APP在WQE中提供的地址是虚拟地址（Virtual Address，VA），经过MMU
 
 注册显存的两种主要方案：
 
-**现代 dmabuf 方案**：通过 CUDA API 获取 dma-buf 文件描述符，然后使用 `ibv_reg_dmabuf_mr` 注册，**优势**：标准化、更好的系统集成性、官方推荐方案。系统要求：
+**现代 dmabuf 方案**：通过 CUDA Driver API `cuMemGetHandleForAddressRange` 获取 dma-buf 文件描述符，然后使用 `ibv_reg_dmabuf_mr` 注册，**优势**：标准化、更好的系统集成性、官方推荐方案。系统要求：
 
-- NVIDIA 驱动：开放变体版本 515+
+- NVIDIA 驱动：开源驱动 nvidia-open（不是闭源驱动cuda-drivers） 515+
 - CUDA：11.7+
 - Linux 内核：5.12+（仅针对 NIC 栈）
 
-**传统 peer-direct 方案**：使用 nvidia-peermem/nv_peer_mem 内核模块与 MLNX_OFED 配合，适合较旧的系统环境或不支持 dmabuf 的情况。直接使用 `ibv_reg_mr` 配合已加载的 nvidia-peermem 模块
+**传统 peer-direct 方案**：使用 nvidia-peermem/nv_peer_mem 内核模块与 MLNX_OFED 配合，适合较旧的系统环境或不支持 dmabuf 的情况。直接使用 `ibv_reg_mr` 配合已加载的 nvidia-peermem 模块，这样 `ibv_reg_mr` 直接可以注册显存。
 
 **优先考虑 dmabuf 方案**，对于无法使用 dmabuf 的情况，传统的 peer-direct 路径仍然可用，但可能需要特定版本的 MLNX_OFED 和 nvidia-peermem 模块支持。
 
 参考：
 
 [call ibv_reg_mr failed using mapped memory #266](https://github.com/NVIDIA/gdrcopy/issues/266)
+
+**遇到的问题**
+
+`cuMemGetHandleForAddressRange`返回错误码 [801](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TYPES.html#group__CUDA__TYPES_1ggc6c391505e117393cc2558fff6bfc2e954756ae7ade0dfd09faeccb513dd831b)，原因在于使用了闭源驱动cuda-drivers。
+
+```shell
+CUDA_ERROR_NOT_SUPPORTED = 801
+    This error indicates that the attempted operation is not supported on the current system or device
+```
+
+参考https://github.com/microsoft/mscclpp/issues/496
+
+```shell
+Pls try branch binyli/bug-fix, I think the reason for this is dma buffer is not supported in your platform. You may need to check the kernel version and driver version.
+
+Pls check following things:
+
+    The NVIDIA driver installed on your machine is the proprietary flavor. You need to “open” flavor to use DMABUF. The CUDA toolkit download page (such as https://developer.nvidia.com/cuda-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=24.04&target_type=deb_network) tells you how to install the open flavor.
+
+    The nvidia driver is too old. You need 515.43.04+, R535TRD1+ or later.
+
+    You need bare metel GPU or MIG. vGPU is not supported.
+
+    You Linux kernel is too old. You need linux kernel 3.x (could not remember the exact minor version) or later.
+```
+
+![image-20250917103743861](assets/rdma/image-20250917103743861.png)
+
+
+
+
 
 ## Protection Domain
 

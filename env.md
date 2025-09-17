@@ -23,6 +23,9 @@ sudo apt-get -y install cuda-toolkit-13-0
 # To install the proprietary kernel module flavor
 # 安装专有内核模块版本，用于高性能计算
 sudo apt-get install -y cuda-drivers
+
+#如果需要支持 dmabuf 的功能，需要安装开源版本
+sudo apt-get install -y nvidia-open
 ```
 
 ## gdrcopy
