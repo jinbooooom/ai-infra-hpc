@@ -1205,9 +1205,11 @@ struct ibv_send_wr wr = {
 
 #### 使用 OFED 包安装 IB 驱动
 
+下载地址： [NVIDIA MLNX_OFED](https://network.nvidia.com/products/infiniband-drivers/linux/mlnx_ofed/) 
+
 ```shell
 sudo mkdir /mnt/ofed
-sudo mount -o ro,loop MLNX_OFED_LINUX-24.10-2.1.8.0-ubuntu20.04-x86_64.iso  /mnt/ofed
+sudo mount -o ro,loop MLNX_OFED_LINUX*.iso  /mnt/ofed
 cd /mnt/ofed
 sudo ./mlnxofedinstall --force
 # 或者
@@ -1237,8 +1239,6 @@ sudo apt install package_name=package_version
 apt list --all-versions package_name
 dpkg -l package_name #建议使用这一个
 ```
-
-或者直接安装 [NVIDIA MLNX_OFED](https://network.nvidia.com/products/infiniband-drivers/linux/mlnx_ofed/) 包
 
 ### 查看动态库属于哪一个包的工具
 
