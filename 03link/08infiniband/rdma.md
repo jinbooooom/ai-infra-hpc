@@ -1086,6 +1086,102 @@ root@vcjob-3937-mpimaster-0:/sys/class/pci_bus/0000:41/device# cat numa_node
 
 更多的尝试，让linux与实时操作系统同时运行。各cpu之间可以互相通信，但是运行在实时操作系统上的任务及时响应更快
 
+## RDMA 链式工作请求与门铃机制分析
+
+在RDMA应用中，需要将服务器A上的N个离散的sendbuff（sendbuff0到sendbuffN-1）上的数据发送到服务器B上的N个离散的recvbuff（recvbuff0到recvbuffN-1）中。要求由A发起RDMA Write操作，一次性把N个sendbuff发送到N个recvbuff中。
+
+### SGE方式的配置限制
+
+从代码可以看到，RDMA Write操作中：
+
+```c
+// libibverbs/examples/uar_test.c (452-472行)
+/* prepare the scatter/gather entry */
+memset(&sge, 0, sizeof(sge));
+sge.addr = (uintptr_t)res->buf;
+sge.length = config.msg_size;
+sge.lkey = res->mr->lkey;
+/* prepare the send work request */
+memset(&sr, 0, sizeof(sr));
+sr.next = NULL;
+sr.wr_id = 0;
+sr.sg_list = &sge;
+sr.num_sge = 1;  // 本端可以配置多个SGE
+sr.opcode = opcode;
+if (opcode != IBV_WR_SEND)
+{
+    sr.wr.rdma.remote_addr = res->remote_props.addr;  // 远端只能配置一个地址
+    sr.wr.rdma.rkey = res->remote_props.rkey;         // 远端只能配置一个rkey
+}
+```
+
+**关键限制：**
+
+- **本端（A）**：可以通过`sg_list`和`num_sge`配置多个SGE（Scatter-Gather Element）
+- **远端（B）**：只能配置一个`remote_addr`和`rkey`，没有SGE的概念
+
+因此sge的方式无法做到本端离散buffer到远程离散buffer的数据传输。
+
+### 链式提交
+
+使用`ibv_send_wr`的`next`字段将多个RDMA Write链接在一起：
+
+创建N个`ibv_send_wr`，每个对应一个sendbuff/recvbuff对。每个WR配置一个SGE（对应一个sendbuff）和一个`remote_addr`（对应一个recvbuff），通过`next`字段将它们链接起来，一次性提交整个链表（只调用一次`ibv_post_send`）
+
+这样可以处理完全离散的buffer，需要N个WR，不是严格意义上的"一个操作"，但可以一次性提交所有的任务，只需要一次系统调用。
+
+### 链式提交只触发一次门铃
+
+使用链式工作请求，对于N个WR的链表，门铃寄存器是只触发一次还是N次？
+
+从MLX5 provider的代码可以看到：
+
+```c
+// providers/mlx5/qp.c (833-1151行)
+static inline int _mlx5_post_send(struct ibv_qp *ibqp, struct ibv_send_wr *wr,
+                                  struct ibv_send_wr **bad_wr)
+{
+    // ...
+    for (nreq = 0; wr; ++nreq, wr = wr->next) {
+        // ... 处理每个WR，构建WQE（Work Queue Entry）...
+        // 为每个WR构建WQE并写入发送队列
+    }
+
+out:
+    qp->fm_cache = next_fence;
+    post_send_db(qp, bf, nreq, inl, size, ctrl);  // 只调用一次
+    // ...
+}
+```
+
+1. **循环遍历**：循环遍历所有链式WR，为每个WR构建WQE（Work Queue Entry）
+2. **一次性提交**：循环结束后，只调用一次`post_send_db`，传入`nreq`（WR的数量）
+
+在`post_send_db`函数中：
+
+```c
+// providers/mlx5/qp.c (754-802行)
+static inline void post_send_db(struct mlx5_qp *qp, struct mlx5_bf *bf,
+                                int nreq, int inl, int size, void *ctrl)
+{
+    if (unlikely(!nreq))
+        return;
+
+    qp->sq.head += nreq;  // 更新队列头指针，增加nreq个请求
+
+    /*
+     * Make sure that descriptors are written before
+     * updating doorbell record and ringing the doorbell
+     */
+    udma_to_device_barrier();
+    qp->db[MLX5_SND_DBR] = htobe32(qp->sq.cur_post & 0xffff);  // 更新门铃记录
+
+    // ...
+    mmio_write64_be(bf->reg + bf->offset, *(__be64 *)ctrl);  // 只触发一次门铃
+    // ...
+}
+```
+
 ## ibv_send_flags
 
 DeepSeek 总结
