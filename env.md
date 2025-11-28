@@ -17,7 +17,12 @@ sudo apt-get -y install cuda-toolkit-13-0
 
 可以在 `/var/cuda-repo-ubuntu*local` 下看到很多的 deb 包。
 
-之后再安装驱动
+如果已经安装过闭源的nvidia driver，使用如下命令卸载
+```shell
+sudo /usr/bin/nvidia-uninstall
+```
+
+安装驱动
 
 ```shell
 # To install the proprietary kernel module flavor
