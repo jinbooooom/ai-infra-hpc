@@ -1130,6 +1130,12 @@ if (opcode != IBV_WR_SEND)
 
 这样可以处理完全离散的buffer，需要N个WR，不是严格意义上的"一个操作"，但可以一次性提交所有的任务，只需要一次系统调用。
 
+### 一次提交的WR超过SQ剩余WR的数量会报错
+
+**ibv_create_qp**在创建时通过设置`qp_init_attr.cap.max_send_wr`的值，配置了SQ WR最大的数量，那么N个WR的链式提交一次性将消耗N个send WR，在 ibv_post_send前需要判断 SQ 剩余的WR 数量来决定当前是否有能力一次性处理N个任务。
+
+如果SQ剩下的WR数量不足以支持一个链式提交，则会返回错误码ret = 12, reason = Cannot allocate memory。
+
 ### 链式提交只触发一次门铃
 
 使用链式工作请求，对于N个WR的链表，门铃寄存器是只触发一次还是N次？
