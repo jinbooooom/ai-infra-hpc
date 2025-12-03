@@ -1,0 +1,1 @@
+nvcc -o nsightTutorial nsightTutorial.cu

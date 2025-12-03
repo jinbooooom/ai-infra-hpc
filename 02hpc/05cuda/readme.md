@@ -135,14 +135,28 @@ DeepSeek 总结
 
 #### `__restrict__`
 
-- **作用**: 用于指示指针是唯一的，帮助编译器优化。
+- **作用**: 消除指针别名分析：编译器可以假设指针不重叠，从而进行更好的优化。提高内存访问性能：可以更积极地使用缓存和寄存器
 
-  ```cpp
-  __global__ void kernelFunction(int *__restrict__ array) {
-      int idx = threadIdx.x;
-      array[idx] = idx;
-  }
-  ```
+```cpp
+// 没有 __restrict__ - 编译器必须考虑指针可能重叠
+__global__ void add(float* a, float* b, float* c, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        c[idx] = a[idx] + b[idx];  // 编译器可能生成更保守的代码
+    }
+}
+
+// 使用 __restrict__ - 编译器可以优化
+__global__ void add_optimized(float* __restrict__ a, 
+                              float* __restrict__ b, 
+                              float* __restrict__ c, 
+                              int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        c[idx] = a[idx] + b[idx];  // 编译器可以生成更激进的优化代码
+    }
+}
+```
 
 总结
 
@@ -152,7 +166,7 @@ DeepSeek 总结
 - `__host__ __device__`: 可在CPU或GPU上执行。
 - `__noinline__` 和 `__forceinline__`: 控制函数内联。
 - `__constant__`, `__shared__`, `__managed__`: 修饰特定内存空间。
-- `__restrict__`: 优化指针使用。
+- `__restrict__`: 告诉编译器指针不重叠，允许更激进的优化。
 
 ## 3.CUDA 编程模型
 
@@ -1336,6 +1350,281 @@ cudaError_t cudaStreamAddCallback(cudaStream_t stream,cudaStreamCallback_t callb
 ```
 
 加入流中。
+
+# Nsight性能分析
+
+
+
+```shell
+# 代码参考 ./99.nsightTutorial/nsightTutorial.cu
+#编译
+nvcc -o nsightTutorial nsightTutorial.cu
+
+#导出为文件，直接在 Windows 上查看图形界面
+nsys profile --trace=cuda,nvtx,osrt -o myNsightReport  ./nsightTutorial
+```
+
+![image-20251203171941580](assets/readme/image-20251203171941580.png)
+
+**--trace=cuda,nvtx,osrt 中三个选项的含义：**
+
+1. cuda - CUDA API 和 GPU 活动跟踪
+
+- CUDA API 调用（如 cudaMalloc, cudaMemcpy, cudaLaunchKernel 等）
+
+- GPU 核函数执行（kernel launches）
+
+- GPU 内存操作
+
+- CUDA 流（streams）和事件（events）
+
+2. nvtx - NVTX (NVIDIA Tools Extension) 标记跟踪
+
+- 代码中通过 NVTX 添加的标记（如 nvtxRangePushA, nvtxRangePop）
+
+- 用户自定义的范围标记
+
+3. osrt - OS Runtime 系统调用跟踪：
+
+- 操作系统运行时库调用（如 malloc, free, pthread 等）
+
+- 系统调用（syscalls）
+
+- 线程创建和切换
+
+## 无图形界面时的性能分析
+
+### 查看默认的报告
+
+```shell
+nsys stats myNsightReport.nsys-rep
+```
+
+输出包含：
+
+- `nvtx_sum`: NVTX 标记统计
+- `osrt_sum`: OS Runtime 统计
+- `cuda_api_sum`: CUDA API 调用统计
+- `cuda_gpu_kern_sum`: **GPU 核函数统计**（最重要）等
+
+```shell
+# 查看所有默认报告（包括核函数摘要）
+nsys stats myNsightReport.nsys-rep
+
+# 下面为输出：
+NOTICE: Existing SQLite export found: myNsightReport.sqlite
+        It is assumed file was previously exported from: myNsightReport.nsys-rep
+        Consider using --force-export=true if needed.
+
+Processing [myNsightReport.sqlite] with [/usr/local/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/nvtx_sum.py]... 
+
+ ** NVTX Range Summary (nvtx_sum):
+
+ Time (%)  Total Time (ns)  Instances    Avg (ns)      Med (ns)     Min (ns)    Max (ns)   StdDev (ns)   Style           Range         
+ --------  ---------------  ---------  ------------  ------------  ----------  ----------  -----------  -------  ----------------------
+     54.7      188,759,380         10  18,875,938.0  18,745,625.0  14,265,270  22,116,807  2,384,373.0  PushPop  :CPU: vectorSinCos    
+     13.8       47,621,561         10   4,762,156.1   3,922,879.0   3,907,798  12,331,074  2,659,460.4  PushPop  :CPU: vectorAdd       
+     11.4       39,167,178         10   3,916,717.8   3,912,998.5   3,908,684   3,937,445      9,460.6  PushPop  :CPU: vectorMultiply  
+     10.2       35,204,093         10   3,520,409.3   3,520,360.0   3,511,691   3,528,096      5,135.5  PushPop  :CPU: vectorDotProduct
+      9.9       34,030,438         10   3,403,043.8   3,404,347.5   3,392,209   3,410,797      5,873.7  PushPop  :CPU: vectorScale     
+
+Processing [myNsightReport.sqlite] with [/usr/local/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/osrt_sum.py]... 
+
+ ** OS Runtime Summary (osrt_sum):
+
+ Time (%)  Total Time (ns)  Num Calls    Avg (ns)       Med (ns)      Min (ns)     Max (ns)    StdDev (ns)            Name         
+ --------  ---------------  ---------  -------------  -------------  -----------  -----------  ------------  ----------------------
+     59.9      772,744,996         17   45,455,588.0   15,445,824.0        2,561  270,750,364  69,625,942.3  poll                  
+     24.5      315,809,270          1  315,809,270.0  315,809,270.0  315,809,270  315,809,270           0.0  pthread_join          
+     15.4      198,036,970        687      288,263.4       10,082.0        1,146   25,660,359   1,158,753.7  ioctl                 
+      0.1        1,623,407         31       52,368.0        5,296.0        3,527    1,172,749     209,042.9  mmap64                
+      0.0          452,009         10       45,200.9       44,406.0       32,446       83,872      15,024.0  sem_timedwait         
+      0.0          247,242         58        4,262.8        3,833.0        1,694       10,844       1,716.6  open64                
+      0.0          214,071         43        4,978.4        3,329.0        1,037       21,020       4,579.7  fopen                 
+      0.0          151,237          3       50,412.3       49,429.0       39,675       62,133      11,261.2  pthread_create        
+      0.0          133,919          1      133,919.0      133,919.0      133,919      133,919           0.0  pthread_cond_wait     
+      0.0           99,506         13        7,654.3        2,317.0        1,182       51,060      13,394.4  mmap                  
+      0.0           56,415         34        1,659.3        1,464.5        1,006        3,882         631.5  fclose                
+      0.0           39,607          1       39,607.0       39,607.0       39,607       39,607           0.0  fgets                 
+      0.0           26,414         15        1,760.9        1,492.0        1,020        4,069         855.2  read                  
+      0.0           25,463          6        4,243.8        4,985.0        1,850        6,433       1,857.6  open                  
+      0.0           21,244         11        1,931.3        1,861.0        1,097        3,141         610.8  write                 
+      0.0           20,186          2       10,093.0       10,093.0        7,110       13,076       4,218.6  fread                 
+      0.0           16,251          3        5,417.0        6,043.0        2,615        7,593       2,547.4  pipe2                 
+      0.0           14,443          2        7,221.5        7,221.5        5,433        9,010       2,529.3  socket                
+      0.0           12,773          3        4,257.7        4,107.0        3,283        5,383       1,058.1  munmap                
+      0.0            9,942          2        4,971.0        4,971.0        3,897        6,045       1,518.9  pthread_cond_broadcast
+      0.0            9,572          1        9,572.0        9,572.0        9,572        9,572           0.0  connect               
+      0.0            4,488          2        2,244.0        2,244.0        1,666        2,822         817.4  fwrite                
+      0.0            2,916          1        2,916.0        2,916.0        2,916        2,916           0.0  bind                  
+      0.0            1,241          1        1,241.0        1,241.0        1,241        1,241           0.0  listen                
+
+Processing [myNsightReport.sqlite] with [/usr/local/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/cuda_api_sum.py]... 
+
+ ** CUDA API Summary (cuda_api_sum):
+
+ Time (%)  Total Time (ns)  Num Calls   Avg (ns)     Med (ns)    Min (ns)    Max (ns)   StdDev (ns)                Name               
+ --------  ---------------  ---------  -----------  -----------  ---------  ----------  -----------  ---------------------------------
+     89.2       31,157,683         50    623,153.7      3,443.5      3,219  30,929,087  4,373,375.6  cudaLaunchKernel                 
+      4.5        1,587,478          1  1,587,478.0  1,587,478.0  1,587,478   1,587,478          0.0  cudaGetDeviceProperties_v2_v12000
+      2.7          927,506          2    463,753.0    463,753.0    438,283     489,223     36,020.0  cudaMemcpy                       
+      2.4          853,812          4    213,453.0    156,118.5    147,944     393,631    120,279.5  cudaFree                         
+      1.1          376,273          4     94,068.3     71,267.5     63,114     170,624     51,184.0  cudaMalloc                       
+      0.1           42,747          1     42,747.0     42,747.0     42,747      42,747          0.0  cudaDeviceSynchronize            
+      0.0            1,118          1      1,118.0      1,118.0      1,118       1,118          0.0  cuModuleGetLoadingMode           
+
+Processing [myNsightReport.sqlite] with [/usr/local/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/cuda_gpu_kern_sum.py]... 
+
+ ** CUDA GPU Kernel Summary (cuda_gpu_kern_sum):
+
+ Time (%)  Total Time (ns)  Instances  Avg (ns)  Med (ns)  Min (ns)  Max (ns)  StdDev (ns)                        Name                      
+ --------  ---------------  ---------  --------  --------  --------  --------  -----------  ------------------------------------------------
+     33.4          220,354         10  22,035.4  22,032.5    21,792    22,209        125.6  vectorDotProduct(float *, float *, float *, int)
+     19.6          129,312         10  12,931.2  12,912.0    12,832    13,088         77.6  vectorSinCos(float *, float *, int)             
+     16.4          108,256         10  10,825.6  10,592.0    10,496    12,928        742.1  vectorAdd(float *, float *, float *, int)       
+     15.7          103,682         10  10,368.2  10,304.0    10,272    10,880        186.6  vectorMultiply(float *, float *, float *, int)  
+     15.0           98,912         10   9,891.2   9,888.0     9,792     9,984         53.2  vectorScale(float *, float, int)                
+
+Processing [myNsightReport.sqlite] with [/usr/local/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/cuda_gpu_mem_time_sum.py]... 
+
+ ** CUDA GPU MemOps Summary (by Time) (cuda_gpu_mem_time_sum):
+
+ Time (%)  Total Time (ns)  Count  Avg (ns)   Med (ns)   Min (ns)  Max (ns)  StdDev (ns)           Operation          
+ --------  ---------------  -----  ---------  ---------  --------  --------  -----------  ----------------------------
+    100.0          758,436      2  379,218.0  379,218.0   378,306   380,130      1,289.8  [CUDA memcpy Host-to-Device]
+
+Processing [myNsightReport.sqlite] with [/usr/local/cuda-12.8/nsight-systems-2024.6.2/host-linux-x64/reports/cuda_gpu_mem_size_sum.py]... 
+
+ ** CUDA GPU MemOps Summary (by Size) (cuda_gpu_mem_size_sum):
+
+ Total (MB)  Count  Avg (MB)  Med (MB)  Min (MB)  Max (MB)  StdDev (MB)           Operation          
+ ----------  -----  --------  --------  --------  --------  -----------  ----------------------------
+      8.389      2     4.194     4.194     4.194     4.194        0.000  [CUDA memcpy Host-to-Device]
+```
+
+### 查看指定的报告
+
+默认的报告显示的内容较多，可以查看指定的内容。
+
+指定的内容可以是nvtx_sum、osrt_sum、cuda_api_sum、cuda_gpu_kern_sum（核函数统计摘要）、cuda_gpu_mem_time_sum、cuda_gpu_mem_size_sum、cuda_kern_exec_sum（核函数启动与执行时间对比） 等。参考后文的[报告类型](#报告类型)
+
+```shell
+# 只查看 GPU 核函数统计
+nsys stats --report cuda_gpu_kern_sum myNsightReport.nsys-rep
+
+# 打印：
+** CUDA GPU Kernel Summary (cuda_gpu_kern_sum):
+
+ Time (%)  Total Time (ns)  Instances  Avg (ns)  Med (ns)  Min (ns)  Max (ns)  StdDev (ns)                        Name                      
+ --------  ---------------  ---------  --------  --------  --------  --------  -----------  ------------------------------------------------
+     33.4          220,354         10  22,035.4  22,032.5    21,792    22,209        125.6  vectorDotProduct(float *, float *, float *, int)
+     19.6          129,312         10  12,931.2  12,912.0    12,832    13,088         77.6  vectorSinCos(float *, float *, int)             
+     16.4          108,256         10  10,825.6  10,592.0    10,496    12,928        742.1  vectorAdd(float *, float *, float *, int)       
+     15.7          103,682         10  10,368.2  10,304.0    10,272    10,880        186.6  vectorMultiply(float *, float *, float *, int)  
+     15.0           98,912         10   9,891.2   9,888.0     9,792     9,984         53.2  vectorScale(float *, float, int)  
+```
+
+**列说明：**
+
+- **Time (%)**: 每个核函数占总 GPU 时间的百分比
+- **Total Time (ns)**: 总执行时间（纳秒）
+- **Instances**: 调用次数
+- **Avg (ns)**: 平均执行时间
+- **Med (ns)**: 中位数执行时间
+- **Min (ns)**: 最短执行时间
+- **Max (ns)**: 最长执行时间
+- **StdDev (ns)**: 标准差
+- **Name**: 核函数名称
+
+```shell
+# 查看 nvtx 报告
+nsys stats --report nvtx_sum myNsightReport.nsys-rep
+
+打印
+ ** NVTX Range Summary (nvtx_sum):
+
+ Time (%)  Total Time (ns)  Instances    Avg (ns)      Med (ns)     Min (ns)    Max (ns)   StdDev (ns)   Style           Range         
+ --------  ---------------  ---------  ------------  ------------  ----------  ----------  -----------  -------  ----------------------
+     54.7      188,759,380         10  18,875,938.0  18,745,625.0  14,265,270  22,116,807  2,384,373.0  PushPop  :CPU: vectorSinCos    
+     13.8       47,621,561         10   4,762,156.1   3,922,879.0   3,907,798  12,331,074  2,659,460.4  PushPop  :CPU: vectorAdd       
+     11.4       39,167,178         10   3,916,717.8   3,912,998.5   3,908,684   3,937,445      9,460.6  PushPop  :CPU: vectorMultiply  
+     10.2       35,204,093         10   3,520,409.3   3,520,360.0   3,511,691   3,528,096      5,135.5  PushPop  :CPU: vectorDotProduct
+      9.9       34,030,438         10   3,403,043.8   3,404,347.5   3,392,209   3,410,797      5,873.7  PushPop  :CPU: vectorScale   
+```
+
+### 报告类型
+
+**CUDA 相关报告（核函数和内存）**
+
+- cuda_api_trace - CUDA API 详细跟踪（按时间顺序）
+
+- cuda_gpu_trace - GPU 核函数和内存操作的详细跟踪
+
+- cuda_gpu_sum - GPU 总体摘要（核函数+内存操作）
+
+- cuda_gpu_kern_gb_sum - 核函数按 Grid/Block 分组的摘要
+
+- cuda_api_gpu_sum - CUDA API/核函数/内存操作的综合摘要
+
+- cuda_kern_exec_sum - 核函数启动与执行时间摘要
+
+- cuda_kern_exec_trace - 核函数启动与执行时间详细跟踪
+
+**NVTX 相关报告**
+
+- nvtx_pushpop_sum - NVTX Push/Pop 范围摘要
+
+- nvtx_pushpop_trace - NVTX Push/Pop 范围详细跟踪
+
+- nvtx_startend_sum - NVTX Start/End 范围摘要
+
+- nvtx_kern_sum - NVTX 范围内的核函数摘要
+
+- nvtx_gpu_proj_sum - NVTX GPU 投影摘要
+
+- nvtx_gpu_proj_trace - NVTX GPU 投影详细跟踪
+
+**其他报告**
+
+- syscall_sum - 系统调用摘要
+
+- um_sum - 统一内存分析摘要
+
+- um_total_sum - 统一内存总计摘要
+
+- um_cpu_page_faults_sum - 统一内存 CPU 页错误摘要
+
+**其他 API 报告（如果使用了相关库）**
+
+- mpi_event_sum, mpi_event_trace - MPI 事件
+
+- openmp_sum - OpenMP
+
+- openacc_sum - OpenACC
+
+- opengl_khr_range_sum, opengl_khr_gpu_range_sum - OpenGL
+
+- vulkan_api_sum, vulkan_api_trace, vulkan_marker_sum, vulkan_gpu_marker_sum - Vulkan
+
+- nvvideo_api_sum - NvVideo
+
+- dx11_pix_sum, dx12_pix_sum, dx12_gpu_marker_sum - DirectX（Windows）
+
+### 查看某个报告的详细信息
+
+```shell
+nsys stats --help-reports cuda_gpu_kern_sum
+```
+
+
+
+
+
+
+
+
+
+
 
 # 其它
 
