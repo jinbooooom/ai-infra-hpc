@@ -1749,3 +1749,501 @@ nsys stats --report nvtx_sum myNsightReport.nsys-rep
 ```shell
 nsys stats --help-reports cuda_gpu_kern_sum
 ```
+
+# CUDA-GDB 调试
+
+`cuda-gdb` 是 NVIDIA 提供的 CUDA 程序调试器，基于 GDB，支持同时调试 CPU 和 GPU 代码。它可以：
+
+- 在内核函数中设置断点
+- 单步执行 GPU 代码
+- 查看 CUDA 线程、块、网格的状态
+- 检查设备内存
+- 调试多 GPU 程序
+
+程序在[98.cuda-gdbTutorial/example.cu](./98.cuda-gdbTutorial/example.cu)
+
+## 编译
+
+关键编译选项
+
+要使用 cuda-gdb 调试，编译时必须包含以下选项：
+
+```bash
+nvcc -g -G -O0 example.cu -o example
+```
+
+**选项说明：**
+
+- `-g`: 为主机代码（CPU）生成调试信息
+- `-G`: 为设备代码（GPU）生成调试信息（**必须使用**，已包含行号信息）
+- `-O0`: 禁用优化，保持代码结构便于调试
+- `-Wno-deprecated-gpu-targets`: 抑制架构警告（可选）
+- `--ptxas-options=-v`: 显示寄存器使用情况（可选）
+
+使用提供的编译脚本
+
+```bash
+cd cuda-gdb
+chmod +x build.sh
+./build.sh
+```
+
+## 启动调试器
+
+基本启动
+
+```bash
+cuda-gdb ./example
+```
+
+带参数启动
+
+```bash
+cuda-gdb --args ./example arg1 arg2
+```
+
+附加到运行中的进程
+
+```bash
+# 在另一个终端运行程序
+./example
+
+# 在 cuda-gdb 中附加
+cuda-gdb
+(gdb) attach <PID>
+```
+
+## 基本调试命令
+
+### 程序控制
+
+| 命令 | 简写 | 说明 |
+|------|------|------|
+| `run` | `r` | 运行程序 |
+| `continue` | `c` | 继续执行直到下一个断点 |
+| `next` | `n` | 执行下一行（不进入函数） |
+| `step` | `s` | 执行下一行（进入函数） |
+| `finish` | `fin` | 执行完当前函数 |
+| `quit` | `q` | 退出调试器 |
+
+### 断点设置
+
+| 命令 | 说明 |
+|------|------|
+| `break function_name` | 在函数处设置断点 |
+| `break file.cu:line_number` | 在指定文件的指定行设置断点 |
+| `break kernel_name` | 在内核启动处设置断点 |
+| `info breakpoints` | 查看所有断点 |
+| `delete breakpoint_num` | 删除指定断点 |
+| `disable breakpoint_num` | 禁用断点 |
+| `enable breakpoint_num` | 启用断点 |
+
+### 查看变量和内存
+
+| 命令 | 说明 |
+|------|------|
+| `print variable` | 打印变量值 |
+| `print *pointer` | 打印指针指向的值 |
+| `print array[0]@10` | 打印数组的前10个元素 |
+| `x/10xw address` | 以十六进制查看内存（10个字，即40字节），常用这一种 |
+| `x/10dw address` | 以十进制查看内存（10个字，即40字节） |
+| `x/10xb address` | 以十六进制查看内存（10个字节） |
+| `x/10xh address` | 以十六进制查看内存（10个半字，即20字节） |
+| `info locals` | 查看局部变量 |
+| `info args` | 查看函数参数 |
+
+**内存查看命令格式说明：**
+- `x/[数量][格式][单位] 地址`
+- **数量**：要显示多少个单位
+- **格式**：`x`(十六进制), `d`(十进制), `o`(八进制), `t`(二进制), `c`(字符), `s`(字符串)
+- **单位**：`b`(byte/1字节), `h`(halfword/2字节), `w`(word/4字节), `g`(giant/8字节)
+- **示例**：`x/10xw` = 以十六进制显示10个字（10×4=40字节）
+
+### 调用栈
+
+| 命令 | 说明 |
+|------|------|
+| `backtrace` | `bt` | 显示调用栈 |
+| `frame n` | `f n` | 切换到第 n 帧 |
+| `up` | 向上移动一帧 |
+| `down` | 向下移动一帧 |
+
+## CUDA 特定命令
+
+### CUDA 线程和块信息
+
+| 命令 | 说明 |
+|------|------|
+| `cuda thread(缩写t)` | 显示当前 CUDA 线程信息 |
+| `cuda block(缩写b)` | 显示当前 CUDA 块信息 |
+| `cuda grid(缩写g)` | 显示当前 CUDA 网格信息 |
+| `cuda lane(缩写l)` | 显示当前 warp 中的 lane |
+| `cuda sm(缩写s)` | 显示当前流多处理器（SM）信息 |
+
+### CUDA 线程切换
+
+| 命令 | 说明 |
+|------|------|
+| `cuda thread (blockIdx, threadIdx)` | 切换到指定线程 |
+| `cuda thread (0,0)` | 切换到块(0,0)的线程(0,0,0) |
+| `cuda thread (1,2,3)` | 切换到块1的线程(2,3,0) |
+| `cuda lane lane_id` | 切换到指定 lane |
+
+### CUDA 内核调试
+
+| 命令 | 说明 |
+|------|------|
+| `cuda kernel` | 显示当前内核信息 |
+| `cuda kernel kernel_id` | 切换到指定内核 |
+| `info cuda kernels` | 列出所有内核的详细信息 |
+
+### CUDA 设备管理
+
+| 命令 | 说明 |
+|------|------|
+| `cuda device` | 显示当前设备 |
+| `cuda device device_id` | 切换到指定设备 |
+| `info cuda devices` | 列出所有设备的详细信息 |
+
+### CUDA 内存检查
+
+| 命令 | 说明 |
+|------|------|
+| `info cuda devices` | 查看所有设备信息（包括内存信息） |
+| `info cuda kernels` | 查看内核信息（包括内存使用） |
+
+**注意**: 对于内存错误检查，建议使用独立的 `cuda-memcheck` 工具，而不是在 cuda-gdb 中直接使用。
+
+
+### CUDA Warp 和 Lane 操作
+
+| 命令 | 说明 |
+|------|------|
+| `cuda warp` | 显示当前 warp 信息 |
+| `cuda warp warp_id` | 切换到指定 warp |
+| `cuda lane` | 显示当前 lane |
+| `cuda lane lane_id` | 切换到指定 lane |
+| `info cuda warps` | 列出所有 warp 信息 |
+
+### 多 GPU 调试
+
+```bash
+# 切换到指定设备
+(cuda-gdb) cuda device 1
+
+# 查看所有设备
+(cuda-gdb) info cuda devices
+
+# 查看当前设备
+(cuda-gdb) cuda device
+```
+
+## 高级技巧
+
+### 1. 条件断点
+
+```bash
+# 只在特定条件下触发断点
+(cuda-gdb) break vectorAdd if idx == 100
+(cuda-gdb) break example.cu:45 if data[idx] > threshold
+```
+
+### 2. 观察点（Watchpoint）
+
+```bash
+# 当变量值改变时停止
+(cuda-gdb) watch variable_name
+(cuda-gdb) watch *pointer
+```
+
+### 3. 命令序列
+
+```bash
+# 定义命令序列
+(cuda-gdb) define my_sequence
+> print idx
+> print a[idx]
+> print b[idx]
+> print c[idx]
+> end
+
+# 使用
+(cuda-gdb) my_sequence
+```
+
+### 4. 日志记录
+
+```bash
+# 将输出保存到文件
+(cuda-gdb) set logging file debug.log
+(cuda-gdb) set logging enabled on
+# ... 执行调试命令 ...
+(cuda-gdb) set logging enabled off
+```
+
+### 5. 多线程调试
+
+```bash
+# 查看所有线程
+(cuda-gdb) info threads
+
+# 切换到指定线程
+(cuda-gdb) thread thread_id
+```
+
+### 6. 检查内存错误
+
+结合 `cuda-memcheck` 使用：
+
+```bash
+# 使用 cuda-memcheck 运行
+cuda-memcheck cuda-gdb ./example
+
+# 或在 cuda-gdb 中启用
+(cuda-gdb) set cuda memcheck on
+```
+
+### 7. 远程调试
+
+远程调试允许你在开发机器上调试运行在远程服务器上的 CUDA 程序。
+
+
+#### 完整步骤
+
+**步骤 1：在目标机器上启动 cuda-gdbserver**
+
+```bash
+# 在目标机器上，启动 cuda-gdbserver 监听端口 ip_port
+cuda-gdbserver :ip_port ./example
+
+# 或者指定 IP 地址（更安全）
+cuda-gdbserver target_ip:ip_port ./example
+
+# 调试带参数的程序
+cuda-gdbserver :ip_port ./example arg1 arg2
+```
+
+**步骤 2：在开发机器上连接**
+
+```bash
+# 启动 cuda-gdb（不需要指定程序，因为程序在远程运行）
+cuda-gdb
+
+# 连接到远程 cuda-gdbserver
+(cuda-gdb) target remote target_ip:ip_port
+# 例如：target remote 192.168.1.100:1234
+
+# 或者使用完整命令
+cuda-gdb -ex "target remote target_ip:ip_port"
+```
+
+**步骤 3：加载符号和设置断点**
+
+```bash
+# 在 cuda-gdb 中，需要指定可执行程序的路径（用于加载符号）
+(cuda-gdb) file /path/to/example  # 目标机器上的程序路径
+
+# 或者使用符号文件（可以不做）
+(cuda-gdb) symbol-file /path/to/example
+
+# 设置断点
+(cuda-gdb) break vectorAdd
+(cuda-gdb) break example.cu:19
+
+# 继续执行（注意：远程调试不能使用 run 命令，因为对端已经 run 起来了）
+(cuda-gdb) continue
+# 或简写为
+(cuda-gdb) c
+```
+
+**重要提示**：
+- 远程调试时，程序已经在 cuda-gdbserver 上启动，**不能使用 `run` 命令**
+- 如果看到错误 "The 'remote + cuda' target does not support 'run'"，这是正常的
+- 使用 `continue`（或 `c`）命令来继续执行程序
+- 如果程序还未开始执行，cuda-gdbserver 会在你连接后自动启动程序
+
+#### 使用 SSH 隧道（推荐）
+
+如果目标机器在防火墙后或需要更安全的连接，可以使用 SSH 隧道：
+
+```bash
+# 在开发机器上建立 SSH 隧道
+ssh -L ip_port:localhost:ip_port user@target_ip
+
+# 在目标机器的 SSH 会话中启动 cuda-gdbserver
+cuda-gdbserver localhost:ip_port ./example
+
+# 在开发机器上连接（使用 localhost）
+cuda-gdb
+(cuda-gdb) target remote localhost:ip_port
+```
+
+完整示例
+
+```bash
+# === 目标机器 ===
+# 1. 启动 cuda-gdbserver（必须使用 cuda-gdbserver 而不是 gdbserver）
+cuda-gdbserver :ip_port ./example
+
+# === 开发机器 ===
+# 2. 启动 cuda-gdb 并连接
+cuda-gdb
+(cuda-gdb) target remote target_ip:ip_port
+(cuda-gdb) file /home/user/cuda-gdb/example  # 目标机器上的路径
+(cuda-gdb) break vectorAdd
+(cuda-gdb) continue
+# ... 开始调试 ...
+```
+
+#### 调试已运行的程序
+
+如果程序已经在运行，可以使用 `cuda-gdbserver --attach`：
+
+```bash
+# 在目标机器上
+# 找到程序的 PID
+ps aux | grep example
+
+# 附加到运行中的程序（必须使用 cuda-gdbserver）
+cuda-gdbserver :ip_port --attach <PID>
+
+# 在开发机器上连接（同上）
+cuda-gdb
+(cuda-gdb) target remote target_ip:ip_port
+```
+
+### 8. 调试脚本
+
+创建 `.gdbinit` 文件自动执行命令：
+
+```bash
+# .gdbinit
+set print pretty on
+set print array on
+break vectorAdd
+break conditionalKernel
+```
+
+## 调试场景示例
+
+场景1: 调试向量加法内核
+
+```bash
+cuda-gdb ./example
+
+# 在内核函数设置断点
+(cuda-gdb) break vectorAdd
+
+# 运行程序
+(cuda-gdb) run
+
+# 程序会在内核入口停止
+# 查看当前线程信息
+(cuda-gdb) cuda thread
+
+# 查看变量
+(cuda-gdb) print idx
+(cuda-gdb) print n
+
+# 单步执行
+(cuda-gdb) next
+
+# 查看数组元素
+(cuda-gdb) print a[idx]
+(cuda-gdb) print b[idx]
+(cuda-gdb) print c[idx]
+
+# 继续执行
+(cuda-gdb) continue
+```
+
+场景2: 调试条件分支
+
+```bash
+cuda-gdb ./example
+
+# 在条件分支处设置断点
+(cuda-gdb) break conditionalKernel
+(cuda-gdb) break example.cu:45  # 在 if 语句处
+
+# 运行
+(cuda-gdb) run
+
+# 切换到不同的线程观察条件分支
+(cuda-gdb) cuda thread (0,0)    # 小索引，会走 else 分支
+(cuda-gdb) print data[idx]
+(cuda-gdb) print threshold
+
+(cuda-gdb) cuda thread (0,600)  # 大索引，会走 if 分支
+(cuda-gdb) print data[idx]
+```
+
+场景3: 调试共享内存
+
+```bash
+cuda-gdb ./example
+
+# 在共享内存操作处设置断点
+(cuda-gdb) break sharedMemoryKernel
+(cuda-gdb) break example.cu:60  # 在 __syncthreads() 后
+
+# 运行
+(cuda-gdb) run
+
+# 查看共享内存
+(cuda-gdb) print sdata[tid]
+(cuda-gdb) print sdata[0]@32  # 查看前32个元素
+
+# 观察同步点
+(cuda-gdb) next  # 执行到 __syncthreads()
+(cuda-gdb) next  # 继续执行
+```
+
+场景4: 调试循环
+
+```bash
+cuda-gdb ./example
+
+# 在循环内核设置断点
+(cuda-gdb) break loopKernel
+(cuda-gdb) break example.cu:75  # 在循环内部
+
+# 运行
+(cuda-gdb) run
+
+# 观察循环变量
+(cuda-gdb) print i
+(cuda-gdb) print sum
+(cuda-gdb) print iterations
+
+# 单步执行观察循环
+(cuda-gdb) next  # 多次执行观察循环过程
+```
+
+场景5: 调试多维线程块
+
+```bash
+cuda-gdb ./example
+
+# 在矩阵内核设置断点
+(cuda-gdb) break matrixKernel
+
+# 运行
+(cuda-gdb) run
+
+# 查看多维索引
+(cuda-gdb) print col
+(cuda-gdb) print row
+(cuda-gdb) print idx
+
+# 切换到不同的线程
+(cuda-gdb) cuda thread (0,0,0,0)  # 块(0,0) 线程(0,0)
+(cuda-gdb) cuda thread (1,0,0,0)  # 块(1,0) 线程(0,0)
+```
+
+**参考**
+
+- [NVIDIA CUDA-GDB 官方文档](https://docs.nvidia.com/cuda/cuda-gdb/)
+- [GDB 官方文档](https://www.gnu.org/software/gdb/documentation/)
+- [CUDA 编程指南](https://docs.nvidia.com/cuda/cuda-c-programming-guide/)
+- [CUDA 最佳实践指南](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/)
