@@ -17,6 +17,18 @@ sudo apt-get -y install cuda-toolkit-13-0
 
 可以在 `/var/cuda-repo-ubuntu*local` 下看到很多的 deb 包。
 
+查看当前环境是否已经安装了开源的驱动
+
+```shell
+# 包名后面有 open 的字样就是开源的
+dpkg -l | grep "nvidia-driver"
+ii  nvidia-driver-580-open                 580.95.05-0ubuntu0.22.04.1                    amd64        NVIDIA driver (open kernel) metapackage
+
+# 包名后面什么都没有，则是闭源
+dpkg -l | grep "nvidia-driver"
+ii  nvidia-driver-575                      575.57.08-0ubuntu1                            amd64        NVIDIA driver metapackage
+```
+
 如果已经安装过闭源的nvidia driver，使用如下命令卸载
 ```shell
 sudo /usr/bin/nvidia-uninstall
