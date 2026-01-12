@@ -1559,9 +1559,31 @@ IBV_WC_TM_RNDV_INCOMPLETE,
 
 ### PORT DOWN问题
 
-先重启 PORT DOWN 状态的节点**以及与该节点互联的其它节点**。如果不能解决问题，则大概率是光纤没插好。
+先重新加载Mellanox网卡驱动，避免重启：
+
+```shell
+# 重启之前先试试这几个命令是否有效
+# 这一系列命令的目的是重新加载Mellanox网卡驱动，这通常用于解决网卡驱动问题，比如网卡不工作、性能问题或驱动冲突等。这是一种比完全重启系统更轻量的解决方案，可以在不中断其他服务的情况下重置网卡驱动的状态。
+sudo rmmod mlx5_ib
+sudo rmmod mlx5_core
+sudo modprobe mlx5_core
+sudo modprobe mlx5_ib
+```
+
+如果上述命令不能解决，则重启 PORT DOWN 状态的节点**以及与该节点互联的其它节点**。如果不能解决问题，则大概率是光纤没插好。
 
 ![image-20230316134511852](assets/rdma/image-20230316134511852.png)
+
+其它的排错命令
+```shell
+# 查看IB网卡是否存在
+lspci | grep -i infiniband
+#打印 84:00.0 Infiniband controller: Mellanox Technologies MT28908 Family [ConnectX-6]
+
+# 检查系统日志中的错误
+sudo dmesg | grep -i mlx5
+sudo dmesg | grep -i infiniband
+```
 
 ### PORT INIT 问题
 
