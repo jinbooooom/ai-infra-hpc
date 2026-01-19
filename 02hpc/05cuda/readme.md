@@ -662,10 +662,9 @@ __global__ void kernel(int *data) {
   - **硬件优化**：32 位寄存器的设计可以高效地处理整数、浮点数和其他常见数据类型，同时简化硬件电路的设计。
   
 - **指令集架构**
-
-  - **32 位指令集**：许多现代处理器（如 x86、ARM、NVIDIA GPU）使用 32 位指令集，寄存器的大小与指令集匹配，可以简化指令解码和执行。
-
-  - **通用性**：32 位寄存器可以处理 8 位（char）、16 位（short）、32 位（int）和 64 位（long long）数据类型，具有较好的通用性
+- **32 位指令集**：许多现代处理器（如 x86、ARM、NVIDIA GPU）使用 32 位指令集，寄存器的大小与指令集匹配，可以简化指令解码和执行。
+  
+- **通用性**：32 位寄存器可以处理 8 位（char）、16 位（short）、32 位（int）和 64 位（long long）数据类型，具有较好的通用性
 
 #### 本地内存（Local Memory）
 
@@ -702,7 +701,7 @@ cudaError_t cudaMemcpyToSymbol(const void* symbol,const void *src,size_t count);
 
 同 cudaMemcpy的参数列表相似，从src（主机）复制count个字节的内存到symbol（设备）里面。多数情况下此函数是同步的，也就是会马上被执行。
 
-当线程束中所有线程都从相同的地址取数据时，常量内存表现较好，比如执行某一个多项式计算，系数都存在常量内存里效率会非常高，但是如果不同的线程取不同地址的数据，常量内存就不那么好了，因为常量内存的读取机制是：一次读取会广播给所有线程束内的线程。
+**当线程束中所有线程都从相同的地址取数据时，常量内存表现较好，比如执行某一个多项式计算，系数都存在常量内存里效率会非常高，但是如果不同的线程取不同地址的数据，常量内存就不那么好了，因为常量内存的读取机制是：一次读取会广播给所有线程束内的线程。**
 
 #### 纹理内存（Texture Memory）
 
@@ -734,7 +733,7 @@ cudaError_t cudaMemcpyToSymbol(const void* symbol,const void *src,size_t count);
 
 ### 静态全局内存
 
-CPU内存有动态分配和静态分配两种类型，从内存位置来说，动态分配在堆上进行，静态分配在站上进行，在代码上的表现是一个需要new，malloc等类似的函数动态分配空间，并用delete和free来释放。在CUDA中也有类似的动态静态之分，我们前面用的都是要cudaMalloc的，所以对比来说就是动态分配，我们今天来个静态分配的，不过与动态分配相同是，也需要显式的将内存copy到设备端，代码如下:
+CPU内存有动态分配和静态分配两种类型，从内存位置来说，动态分配在堆上进行，静态分配在栈上进行，在代码上的表现是一个需要new，malloc等类似的函数动态分配空间，并用delete和free来释放。在CUDA中也有类似的动态静态之分，我们前面用的都是要cudaMalloc的，所以对比来说就是动态分配，我们今天来个静态分配的，不过与动态分配相同是，也需要显式的将内存copy到设备端，代码如下:
 
 ```cpp
 // 4.1.2.9globalVariable.cu
@@ -791,7 +790,7 @@ cudaMemcpy(dptr,&value,sizeof(float),cudaMemcpyHostToDevice);
 cudaError_t cudaMallocHost(void ** devPtr,size_t count)
 ```
 
-分配**主机端（CPU）的锁页内存**，可以直接传输到设备的（翻译的原文写的是：设备可访问的，英文原文是：Since the  pinned memory can be accessed directly by the  device。应该是翻译问题）这样就是的传输带宽变得高很多。
+分配**主机端（CPU）的锁页内存**，可以直接传输到设备的（翻译的原文写的是：设备可访问的，英文原文是：Since the  pinned memory can be accessed directly by the  device。应该是翻译问题）这样就使得传输带宽变得高很多。
 
 固定的主机内存释放使用：
 
@@ -803,14 +802,14 @@ cudaError_t cudaFreeHost(void *ptr)
 
 主要区别总结（deepseek 总结）：
 
-|     特性     | `cudaMallocHost`                     | `cudaMalloc`                               |
-| :----------: | ------------------------------------ | ------------------------------------------ |
-| **内存位置** | 主机端（CPU）                        | 设备端（GPU）                              |
-| **内存类型** | 页锁定内存（Pinned Memory）          | 设备内存（Device Memory）                  |
-|   **用途**   | 用于主机与设备之间的高效数据传输     | 用于在 GPU 上存储和处理数据                |
-| **访问方式** | 主机代码可以直接访问                 | 只能通过 CUDA 内核函数或 `cudaMemcpy` 访问 |
-|   **性能**   | 数据传输速度快，但分配和释放开销较大 | 分配和释放开销较小，但显存容量有限         |
-| **释放函数** | `cudaFreeHost`                       | `cudaFree`                                 |
+|     特性     |           `cudaMallocHost`           |                `cudaMalloc`                |
+| :----------: | :----------------------------------: | :----------------------------------------: |
+| **内存位置** |            主机端（CPU）             |               设备端（GPU）                |
+| **内存类型** |     页锁定内存（Pinned Memory）      |         设备内存（Device Memory）          |
+|   **用途**   |   用于主机与设备之间的高效数据传输   |        用于在 GPU 上存储和处理数据         |
+| **访问方式** |         主机代码可以直接访问         | 只能通过 CUDA 内核函数或 `cudaMemcpy` 访问 |
+|   **性能**   | 数据传输速度快，但分配和释放开销较大 |     分配和释放开销较小，但显存容量有限     |
+| **释放函数** |            `cudaFreeHost`            |                 `cudaFree`                 |
 
 ### 零拷贝内存
 
@@ -851,7 +850,7 @@ pDevice就是设备上访问主机零拷贝内存的指针了。此处flag必须
 
 ### 统一虚拟寻址（UVA）
 
-设备架构2.0以后(即Fermi 架构之后)，Nvida搞了一套称为统一虚拟寻址方式（`UVA，Unified Virtual Addressing`）的内存机制，这样，设备内存和主机内存被映射到同一虚拟内存地址中。如下图
+设备架构2.0以后(即Fermi 架构之后)，NVIDIA搞了一套称为统一虚拟寻址方式（`UVA，Unified Virtual Addressing`）的内存机制，这样，设备内存和主机内存被映射到同一虚拟内存地址中。如下图
 
 ![4-5](assets/readme/4-5.png)
 

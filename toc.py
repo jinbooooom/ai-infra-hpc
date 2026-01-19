@@ -29,15 +29,15 @@ if __name__ == "__main__":
     gpuDirectConf = fileConfigElement("## GPUDirect 总结", "03link/05gpuDirect/readme.md")
     rdmaConf = fileConfigElement("## RDMA 总结", "03link/08infiniband/rdma.md")
     ncclConf = fileConfigElement("## NCCL 总结", "05ccl/02nccl/readme.md")
-    tarinAndInferConf = fileConfigElement("## 训练与推理总结", "06train&infer/readme.md")
+    tarinAndInferConf = fileConfigElement("## 训练与推理总结", "06trainAndInfer/readme.md")
 
     rootReadmePath = "README.md"
     repoLink = "https://github.com/jinbooooom/ai-infra-hpc/blob/master/"
-    confList = [topoConf,
+    confList = [cudaConf,
+                topoConf,
                 gpuDirectConf,
                 rdmaConf,
                 ncclConf,
-                cudaConf,
                 tarinAndInferConf
     ]
 
