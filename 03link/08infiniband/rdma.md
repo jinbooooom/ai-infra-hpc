@@ -265,7 +265,7 @@ dpdk 基于多核架构，一般会有主从核之分，主核负责完成各个
 - 之后，RDMA实现了零拷贝，即把用户态数据直接DMA到网卡的buffer并发送，避免了内核态的拷贝。这就需要用户先注册一部分用户的地址给网卡使用。但是用户态用的是虚拟地址，而网卡怎么通过虚拟地址对应到物理地址呢？**RNIC上维护了MTT(Memory Translation Table)，它类似于操作系统的页表，维护虚拟地址到物理地址的对应关系**。这样,RNIC就能找到对应的用户态地址并读取/写入了。具体把数据从内存到网卡的搬运，是使用了RNIC上的DMA Engine实现的。
 - 最后，RNIC也需要维护收发报文相关的结构，例如Bacis NIC中的Receiving Buffer。上图中还有ORT, Reordering Buffer, Bitmap，这是因为这个图是论文中的图，而论文中这个RNIC可以在lossy network上工作，所以添加了一些用于保序和重传的数据结构。注意到这些结构是在RNIC上，而如果是内核协议栈的话，是放在内核中。所以这里也是硬件处理了一部分软件协议栈的功能。
 
-## DoorBell
+## IB DoorBell
 
 Doorbell是一种软件发起、硬件接收的通知机制。例如软件通过Doorbell告诉硬件：
 
@@ -274,17 +274,38 @@ Doorbell是一种软件发起、硬件接收的通知机制。例如软件通过
 
 Doorbell有两种实现机制：
 
-- Doorbell寄存器。硬件提供的寄存器，来供软件读写。
-
-- - 优点：实现简单，只需要软件读写寄存器地址
+- Doorbell寄存器。硬件提供的寄存器，来供软件读写（对应的是 Blue Flame 的 MMIO 读写）。
+  - 优点：实现简单，只需要软件读写寄存器地址
   - 缺点：读写寄存器行为会抢占总线；硬件需要立即响应，可能会打断硬件正在进行的工作（例如在DMA读取主机的内存），从而影响传输速率
 
-- Doorbell record。使用主机的一段内存作为中介。软件和硬件都知道这段内存的地址。软件直接写这段内存，硬件在必要时读取该内存
-
-- - 优点：软件通知时不需要抢总线
+- Doorbell record。**门铃记录**使用主机的一段内存作为中介。软件和硬件都知道这段内存的地址。软件直接写这段内存，硬件在必要时读取该内存。就是 qp->db，create QP 时把 db_addr 交给硬件，post_send 时先更新它再用 Blue Flame 写 MMIO。
+  - 优点：软件通知时不需要抢总线
   - 缺点：实时性较差
 
-可以把DB理解成软件通知硬件的方式。
+
+**Doorbell寄存器会占总线、要硬件立即响应；Doorbell record 不抢总线但实时性差，rdma-core 里“先写 record 再写 WC MMIO、并用 mmio_flush_writes 控制顺序”的设计便体现了这一点**。
+
+关于doorbell的一些补充内容：
+
+Blue Flame 寄存器是硬件侧暴露的 MMIO 寄存器，不是软件寄存器（对应`qp->bf->reg`），在 mlx5.c 里，Blue Flame 的寄存器是 UAR 页 mmap 出来的一段地址，对Blue Flame的写入是通过 MMIO 完成的（`mmio_write64_be(bf->reg + bf->offset, ...)`）。这些写的是设备 BAR 映射的 WC MMIO 空间，会变成 PCIe 写事务，由 HCA 硬件接收。具体参考函数mlx驱动**post_send_db**实现。
+
+每个 QP 都有自己的一块Doorbell record（`qp->db`），它是主机内存，创建QP时，把这块内存的地址交给硬件，所在在用户层看起来，每个qp->db地址都不同。
+
+每个 UAR 页里只有有限个 Blue Flame 寄存器：NUM_BFREGS_PER_UAR = 4，且 tot_uuars 有限。
+
+**BF 寄存器被多路复用到很多 QP 上。实际触发通信的那次“按门铃”写的是少数几组硬件 Blue Flame 寄存器，这些寄存器被多个 QP 共享/虚拟化，并不是每个 QP 在物理上独占一个硬件门铃寄存器。**
+
+### 按门铃的时序
+
+参考 post_send_db函数：
+
+1.先 `udma_to_device_barrier()`，保证之前写的 WQE 对设备可见。
+2.然后 `qp->db[MLX5_SND_DBR] = htobe32(qp->sq.cur_post & 0xffff)` , 这就是更新 doorbell record：把 SQ 的“当前已提交的 tail”写进这块主机内存。
+3.再 `mmio_write64_be(bf->reg + bf->offset, ...)` —— 这才是真正按门铃：写硬件寄存器，通知 HCA。
+
+硬件在被门铃唤醒后，会根据自己的设计去读这块已知的 doorbell record 地址（create QP 时已告知硬件约定好的地址），从中得到 tail 等信息，再去主机内存里取 WQE 并执行。
+
+Doorbell record = 软件和硬件约定好的一块主机内存，用来存放“已提交到哪了”等信息；软件写、硬件在需要时读。
 
 ## 拥塞控制
 
