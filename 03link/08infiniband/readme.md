@@ -7,8 +7,5 @@
 ### 链接
 
 - [RDMA 学习资料总目录](https://blog.csdn.net/bandaoyu/article/details/120485737)
-
 - http://www.rdmamojo.com
-
-- https://github.com/liao20081228/blog
 
