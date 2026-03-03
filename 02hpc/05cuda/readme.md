@@ -1105,6 +1105,197 @@ isize就是共享内存要存储的数组的大小。比如一个十个元素的
 
 共享内存没有malloc但是也可以到运行时才分配，具体机制我没去了解，是不是共享内存也分堆和栈，但是我们有必要了解这个方法，因为写过C++程序的都知道，基本上我们的大部分变量是要靠动态分配手动管理的，CUDA好的一点就是动态的共享内存，不需要手动回收。
 
+### 线程束洗牌指令
+
+在 CUDA 中，一个线程束（warp）通常由 32 个线程组成，这 32 个线程以 SIMD/SIMT 方式执行同一条指令。传统上，线程之间的数据交换主要依赖共享内存：
+
+- 线程写入共享内存
+- 调用 `__syncthreads()` 做同步
+- 其他线程从共享内存中读取
+
+这种方式的缺点是：需要额外的共享内存带宽，需要显式同步，增加指令与延迟，容易受到 bank conflict 影响。
+
+为了解决同一 warp 内线程之间的小规模数据交换这一高频需求，硬件提供了 **线程束洗牌（warp shuffle）** 指令，使得线程可以直接在寄存器之间交换数据，绕过共享内存。
+
+**线程束洗牌（warp shuffle）** 是指：在同一 warp 内，一个线程可以直接读取另一个线程寄存器中的值。常见接口（以 CUDA 为例）有（省略了模板参数）：
+
+- `__shfl_sync(mask, var, src_lane, width = warpSize)`
+- `__shfl_up_sync(mask, var, delta, width = warpSize)`
+- `__shfl_down_sync(mask, var, delta, width = warpSize)`
+- `__shfl_xor_sync(mask, var, lane_mask, width = warpSize)`
+
+核心特性：
+
+- 只在同一个硬件 warp 内生效，`width` 只能把这个 warp 再划分成若干子组，不能跨多个 warp 做数据交换
+- 数据在寄存器间流动，延迟小、带宽高
+- 不需要显式 `__syncthreads()`，但需要正确的 `mask` 确保活跃线程集合一致
+
+#### 常见洗牌模式
+
+##### 直接索引（`__shfl_sync`）
+
+语义：每个线程从 `src_lane` 对应线程那里读一个值。
+
+典型用途：广播（broadcast）：例如 `src_lane = 0`，将 lane 0 的值广播到整个 warp![img](assets/readme/v2-5f9575bc738eb301eb2b29134d0451d9_1440w.jpg)
+
+#### 上移/下移（`__shfl_up_sync` / `__shfl_down_sync`）
+
+语义：
+
+- `__shfl_up_sync(mask, var, delta)`：当前 lane 从 `lane_id - delta` 处读取
+- `__shfl_down_sync(mask, var, delta)`：当前 lane 从 `lane_id + delta` 处读取
+
+![img](assets/readme/v2-dbb0fa9402ab3f888a67c23c5d5f2435_1440w.jpg)
+
+![img](assets/readme/v2-a9dd7674d53ce424593336f719e51429_1440w.jpg)
+
+#### 异或模式（`__shfl_xor_sync`）
+
+`__shfl_xor_sync(mask, var, lane_mask, width = warpSize)`
+
+语义：当前 lane 从 `lane_id ^ lane_mask` 对应的线程读取。
+
+典型用途：
+
+- 实现蝶形（butterfly）通信模式
+- 用于归约（reduction）、FFT 等需要对称交换的场景
+
+```text
+当 lane_mask = 1
+对于 laneID = 0x00,0x01,0x10,0x11的lane，需要与 0x01 异或，即从 laneID = 0x01,0x00,0x11,0x10的 lane 获取数据，即相邻的 lane 交换数据
+
+当 lane_mask = 3
+对于 laneID = 0x00,0x01,0x10,0x11的lane，需要与 0x11 异或，即从 laneID = 0x11,0x10,0x01,0x00的 lane 获取数据，即 lane0与lane3交换数据，lane1与lane2交换数据
+```
+
+![img](assets/readme/v2-d5785253a7fcf167498b16f14a27f655_1440w.jpg)
+
+#### 与共享内存方案的对比
+
+**优点：**
+
+- **更低延迟**：数据直接在寄存器之间交换，不经共享内存
+- **更高带宽**：避免共享内存带宽、bank conflict 等瓶颈
+- **无需显式同步**：warp 内天然锁步执行，只要 `mask` 设置正确就不需要 `__syncthreads()`
+- **节省共享内存**：将共享内存资源留给真正需要跨 warp 或跨 block 的数据
+
+**缺点与限制：**
+
+- **仅限同一 warp**：无法进行 block 级甚至 grid 级的数据交换
+- **warp 尺寸固定**：算法需要以 warp 为基本单位来设计
+- **控制流发散敏感**：如果 warp 内存在分支发散，必须确保活跃线程的 `mask` 一致，否则行为未定义
+
+#### 线程束洗牌典型使用场景示例
+
+**在 warp 内广播单个变量的值**
+
+```c
+#include <stdio.h>
+
+__global__ void bcast(int arg) {
+    int laneId = threadIdx.x & 0x1f;
+    int value;
+    // Note unused variable for all threads except lane 0
+    if (laneId == 0)        
+        value = arg;       
+    // Synchronize all threads in warp, and get "value" from lane 0
+    value = __shfl_sync(0xffffffff, value, 0);   
+    if (value != arg)
+        printf("Thread %d failed.\n", threadIdx.x);
+}
+
+int main() {
+    bcast<<< 1, 32 >>>(1234);
+    cudaDeviceSynchronize();
+
+    return 0;
+}
+```
+
+以上代码首先在寄存器内定义一个变量 `value`，随后在 warp 内通道 ID 为 0 的线程中将 `value` 赋值为 `arg`，此时其他 31 个线程的 `value` 还未进行初始化。然后每个线程中调用 `value = __shfl_sync(0xffffffff, value, 0)`，相当于把 ID 为 0 的线程中的 `value` 的值广播到其他 31 个线程并赋值给 `value`。
+
+**在含有 8 个线程的子线程组内进行包含扫描**
+
+```c
+#include <stdio.h>
+
+__global__ void scan4() {
+    int laneId = threadIdx.x & 0x1f;
+    // Seed sample starting value (inverse of lane ID)
+    int value = 31 - laneId;
+
+    // Loop to accumulate scan within my partition.
+    // Scan requires log2(n) == 3 steps for 8 threads
+    // It works by an accumulated sum up the warp
+    // by 1, 2, 4, 8 etc. steps.
+    for (int i=1; i<=4; i*=2) {
+        // We do the __shfl_sync unconditionally so that we
+        // can read even from threads which won't do a
+        // sum, and then conditionally assign the result.
+        int n = __shfl_up_sync(0xffffffff, value, i, 8);
+        if ((laneId & 7) >= i)
+            value += n;
+    }
+
+    printf("Thread %d final value = %d\n", threadIdx.x, value);
+}
+
+int main() {
+    scan4<<< 1, 32 >>>();
+    cudaDeviceSynchronize();
+
+    return 0;
+}
+```
+
+这个程序实现的是**包含扫描(Inclusive Scan)**操作，也称为前缀和(Prefix Sum)。
+
+**包含扫描的定义**： 对于一个数组[a₀, a₁, a₂, ..., aₙ]，包含扫描的结果是[a₀, a₀+a₁, a₀+a₁+a₂, ..., a₀+a₁+...+aₙ]。
+
+**这个程序具体做了什么**：
+
+1. 初始化：每个线程的初始值为`31-laneId`，所以32个线程的初始值是[31,30,29,...,2,1,0]
+2. 分组：通过设置`width=8`，将32个线程分为4组，每组8个线程:
+   - 第1组: [31,30,29,28,27,26,25,24]
+   - 第2组: [23,22,21,20,19,18,17,16]
+   - 第3组: [15,14,13,12,11,10,9,8]
+   - 第4组: [7,6,5,4,3,2,1,0]
+3. 计算：在每个8线程组内独立计算包含扫描结果，即每个位置的值是该位置及之前所有位置值的总和
+
+例如，第一组的计算过程：
+
+- 初始值: [31,30,29,28,27,26,25,24]
+- 结果: [31, 31+30, 31+30+29, ..., 31+30+...+24]
+- 即: [31, 61, 90, 118, 145, 171, 196, 220]
+
+**束内规约**
+
+```c
+#include <stdio.h>
+
+__global__ void warpReduce() {
+    int laneId = threadIdx.x & 0x1f;
+    // Seed starting value as inverse lane ID
+    int value = 31 - laneId;
+
+    // Use XOR mode to perform butterfly reduction
+    for (int i=16; i>=1; i/=2)
+        value += __shfl_xor_sync(0xffffffff, value, i, 32);
+
+    // "value" now contains the sum across all threads
+    printf("Thread %d final value = %d\n", threadIdx.x, value);
+}
+
+int main() {
+    warpReduce<<< 1, 32 >>>();
+    cudaDeviceSynchronize();
+
+    return 0;
+}
+```
+
+上述代码，基于折半规约的思想，调用 `__shfl_xor_sync(0xffffffff, value, i, 32)` 将 warp 内 `value` 的值规约求和到通道 ID 为 0 的线程中。
+
 ## 6.流和并发
 
 ### 流和事件概述
