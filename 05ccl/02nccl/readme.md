@@ -26,6 +26,9 @@
 
 ### Reduce Tree
 
+获取最接近节点数量的二次幂的数据，可以用如下的算法：
+下图是11个节点，十进制11=0b1011，找到最高的1的位置，其余为置0，很显然 0b1000=8就是下图中step0的节点的数量
+
 ![myCCL-Reduce-Tree](./assets/readme/myCCL-Reduce-Tree.png)
 
 ### ReduceScatter Ring

@@ -245,6 +245,8 @@ AI-Switch 串行配置的情况下五个 Flex Cable 的连接方式是：
 
 M1-N1；M3-N3；M5-N2；M6-N6；N4-N5。
 
+**AI串行侧重于计算卡间通信，可以看到PCIe Switch1和2是直接连接的，计算卡之间通信不需要通过CPU延时低带宽性能好，但是PCIe Switch2上的计算卡需要CPU2共同参与运算以及访问CPU2上的内存延时高带宽性能差**
+
 ![image-20250226230659866](./assets/readme/image-20250226230659866.png)
 
 ### AI并行配置
