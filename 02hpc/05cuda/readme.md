@@ -1107,6 +1107,54 @@ isize就是共享内存要存储的数组的大小。比如一个十个元素的
 
 共享内存没有malloc但是也可以到运行时才分配，具体机制我没去了解，是不是共享内存也分堆和栈，但是我们有必要了解这个方法，因为写过C++程序的都知道，基本上我们的大部分变量是要靠动态分配手动管理的，CUDA好的一点就是动态的共享内存，不需要手动回收。
 
+### 栅栏与屏障
+
+| 函数                     | 作用范围            | 功能                                                         | 主要用途                                                    | CPU-GPU可见性             |
+| :----------------------- | :------------------ | :----------------------------------------------------------- | :---------------------------------------------------------- | :------------------------ |
+| `__threadfence_block()`  | 当前block           | **GPU设备端调用**。确保当前线程在fence之前的所有全局内存和共享内存写入，对栅栏后同一block内的所有线程可见 | 块内线程的内存一致性，不需要跨block同步时使用               | 不保证                    |
+| `__threadfence()`        | GPU设备内（所有SM） | **GPU设备端调用**。确保当前线程在fence之前的所有全局内存和共享内存写入，对栅栏后同一GPU设备上的所有线程可见。书中原话是：__threadfence挂起调用的线程，直到全局内存中的所有写操作对相同网格内的所有线程都是可见的。 | 跨block的线程间通信、GPU设备内的内存一致性                  | 不保证                    |
+| `__threadfence_system()` | 整个系统（GPU+CPU） | **GPU设备端调用**。确保当前线程在fence之前的所有全局内存、锁页主机内存和其他设备内存中的所有写操作对全部设备中的线程和主机线程是可见的 | CPU-GPU共享内存场景、统一内存（Unified Memory）、跨设备通信 | 保证                      |
+| `__syncthreads()`        | 当前block           | **GPU设备端调用**。同步屏障：所有线程必须到达此点才能继续执行。隐含了`__threadfence_block()`的效果 | 块内线程同步 + 内存一致性，需要等待所有线程到达同步点       | 不保证                    |
+| `__sync_synchronize()`   | CPU端               | **CPU端调用**（GCC内置函数）。完整内存屏障：确保在此屏障之前的所有内存操作（读写）完成，并对所有CPU核心可见，然后才执行屏障之后的操作 | 与GPU共享内存时确保CPU写入完成                              | 仅CPU端，需配合GPU端fence |
+
+**栅栏（fence）与屏障（barrier）的对比**
+
+| 概念           | 典型例子                                | 是否等待其他线程             | 主要作用对象                     | 主要保证                                                         |
+| :------------- | :-------------------------------------- | :--------------------------- | :------------------------------- | :--------------------------------------------------------------- |
+| 内存栅栏fence  | `__threadfence*()`、`__sync_synchronize()` | 一般**不等待**其他线程       | 单个线程的内存操作顺序           | 约束本线程内存操作的先后顺序与可见性，防止指令/内存访问被重排   |
+| 同步屏障barrier | `__syncthreads()`、线程库中的 `barrier` | **需要等待**所有参与线程到达 | 一组线程（如一个 block / 线程组） | 让所有线程在同一点汇合，同时通常隐含一个组内的内存可见性/fence |
+
+**注意事项**
+
+1. **性能权衡**：`__threadfence_system()` 最慢，但CPU-GPU共享内存场景必须使用
+2. **等待循环优化**：在等待循环中，可以降低fence调用频率（如每N次循环调用一次）
+3. **volatile关键字**：配合使用`volatile`确保读取不被编译器优化
+4. **`__syncthreads()` vs fence**：`__syncthreads()`是同步原语（会等待），fence是内存屏障（不等待）
+5. **CPU端同步**：CPU端不能调用GPU的fence函数，应使用`__sync_synchronize()`或CUDA运行时同步API
+
+
+
+**CPU-GPU同步的简单代码**
+
+```c
+// CPU端
+*requestCnt = new_value;
+__sync_synchronize();  // 确保CPU写入完成并可见
+
+// GPU端（在核函数中）
+while (requestCnt == old_value) {
+    __threadfence_system();  // 确保看到CPU的最新写入
+}
+// GPU端（在核函数中）
+*triggerCnt = new_value;
+__threadfence_system();  // 确保GPU写入对CPU可见
+
+// CPU端
+cudaDeviceSynchronize();  // 等待GPU操作完成
+__sync_synchronize();     // CPU端内存屏障
+uint32_t value = *triggerCnt;  // 读取GPU写入的值
+```
+
 ### 线程束洗牌指令
 
 在 CUDA 中，一个线程束（warp）通常由 32 个线程组成，这 32 个线程以 SIMD/SIMT 方式执行同一条指令。传统上，线程之间的数据交换主要依赖共享内存：
@@ -1140,7 +1188,7 @@ isize就是共享内存要存储的数组的大小。比如一个十个元素的
 
 典型用途：广播（broadcast）：例如 `src_lane = 0`，将 lane 0 的值广播到整个 warp![img](assets/readme/v2-5f9575bc738eb301eb2b29134d0451d9_1440w.jpg)
 
-#### 上移/下移（`__shfl_up_sync` / `__shfl_down_sync`）
+##### 上移/下移（`__shfl_up_sync` / `__shfl_down_sync`）
 
 语义：
 
@@ -1151,7 +1199,7 @@ isize就是共享内存要存储的数组的大小。比如一个十个元素的
 
 ![img](assets/readme/v2-a9dd7674d53ce424593336f719e51429_1440w.jpg)
 
-#### 异或模式（`__shfl_xor_sync`）
+##### 异或模式（`__shfl_xor_sync`）
 
 `__shfl_xor_sync(mask, var, lane_mask, width = warpSize)`
 
@@ -2496,47 +2544,6 @@ cuda-gdb ./example
 4.使用 float4,double2向量化加载数据
 5.循环展开
 6.根据具体芯片微调block形状
-
-## GPU与CPU的同步与内存屏障机制
-
-| 函数                     | 作用范围            | 功能                                                         | 主要用途                                                    | CPU-GPU可见性             |
-| :----------------------- | :------------------ | :----------------------------------------------------------- | :---------------------------------------------------------- | :------------------------ |
-| `__threadfence()`        | GPU设备内（所有SM） | **GPU设备端调用**。确保当前线程在fence之前的所有全局内存和共享内存写入，对同一GPU设备上的所有线程可见 | 跨block的线程间通信、GPU设备内的内存一致性                  | 不保证                    |
-| `__threadfence_block()`  | 当前block           | **GPU设备端调用**。确保当前线程在fence之前的所有全局内存和共享内存写入，对同一block内的所有线程可见 | 块内线程的内存一致性，不需要跨block同步时使用               | 不保证                    |
-| `__threadfence_system()` | 整个系统（GPU+CPU） | **GPU设备端调用**。确保当前线程在fence之前的所有全局内存和共享内存写入，对CPU、GPU设备上的所有线程以及其他设备可见 | CPU-GPU共享内存场景、统一内存（Unified Memory）、跨设备通信 | 保证                      |
-| `__syncthreads()`        | 当前block           | **GPU设备端调用**。同步屏障：所有线程必须到达此点才能继续执行。隐含了`__threadfence_block()`的效果 | 块内线程同步 + 内存一致性，需要等待所有线程到达同步点       | 不保证                    |
-| `__sync_synchronize()`   | CPU端               | **CPU端调用**（GCC内置函数）。完整内存屏障：确保在此屏障之前的所有内存操作（读写）完成，并对所有CPU核心可见，然后才执行屏障之后的操作 | 与GPU共享内存时确保CPU写入完成                              | 仅CPU端，需配合GPU端fence |
-
-**注意事项**
-
-1. **性能权衡**：`__threadfence_system()` 最慢，但CPU-GPU共享内存场景必须使用
-2. **等待循环优化**：在等待循环中，可以降低fence调用频率（如每N次循环调用一次）
-3. **volatile关键字**：配合使用`volatile`确保读取不被编译器优化
-4. **`__syncthreads()` vs fence**：`__syncthreads()`是同步原语（会等待），fence是内存屏障（不等待）
-5. **CPU端同步**：CPU端不能调用GPU的fence函数，应使用`__sync_synchronize()`或CUDA运行时同步API
-
-
-
-**CPU-GPU同步的简单代码**
-
-```c
-// CPU端
-*requestCnt = new_value;
-__sync_synchronize();  // 确保CPU写入完成并可见
-
-// GPU端（在核函数中）
-while (requestCnt == old_value) {
-    __threadfence_system();  // 确保看到CPU的最新写入
-}
-// GPU端（在核函数中）
-*triggerCnt = new_value;
-__threadfence_system();  // 确保GPU写入对CPU可见
-
-// CPU端
-cudaDeviceSynchronize();  // 等待GPU操作完成
-__sync_synchronize();     // CPU端内存屏障
-uint32_t value = *triggerCnt;  // 读取GPU写入的值
-```
 
 ## cuda流和cuda graph
 
