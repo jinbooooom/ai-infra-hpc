@@ -387,7 +387,19 @@ double binary tree
 
 ## [NCCL Protocol](https://zhuanlan.zhihu.com/p/699178659)
 
+NCCL (NVIDIA Collective Communications Library) 实现了三种核心通信协议：
+
+| 协议类型 | 定义常量          | 主要特点             | 适用场景         |
+| -------- | ----------------- | -------------------- | ---------------- |
+| LL       | NCCL_PROTO_LL     | 低延迟、带标志位同步 | 小消息、延迟敏感 |
+| LL128    | NCCL_PROTO_LL128  | 128字节对齐、高带宽  | 中等大小消息     |
+| Simple   | NCCL_PROTO_SIMPLE | 简单高效、最高带宽   | 大消息、带宽敏感 |
+
+更多细节参考博客：https://zhuanlan.zhihu.com/p/1984770740919215073
+
 ### Simple协议
+
+尽量把 NVLink / PCIe / IB 的带宽“跑满”，适合 中大尺寸消息。做法大致是把一整个 tensor 分成若干 大 chunk，每个 chunk 由一个 warp/一组线程负责搬运，多个 chunk 在 ring/tree 上传输形成 流水线，发送和接收可以重叠。
 
 LL低延迟应该是和Simple相比而言，因为Simple使用了`__threadfence_system`，这个操作比较重。
 
