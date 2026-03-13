@@ -1,4 +1,12 @@
 .idea/*
+.cache/*
+.vscode/*
+.clangd
+.specstory/*
+.cursor/*
+.cursorindexingignore
+.claude
+
 data/*
 **/exec
 **/.vs/*
@@ -7,6 +15,7 @@ data/*
 **/*.o
 **/*.out
 *.h.gch
+Thumbs.db
 
 main
 test
@@ -16,10 +25,6 @@ t
 tmp
 t.cpp
 build
-
-**/.vscode/*
-**/.vscode
-Thumbs.db
 
 # Prerequisites
 

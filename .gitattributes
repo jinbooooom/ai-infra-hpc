@@ -1,20 +1,36 @@
-# 强制所有文本文件使用LF行尾符（Linux/Unix风格）
-* text eol=lf
+# 强制所有「文本」文件使用 LF 行尾符（Linux/Unix风格），自动识别文本/二进制
+* text=auto eol=lf
 
-# 确保这些文件类型使用LF
-*.c text eol=lf
-*.cpp text eol=lf
-*.cu text eol=lf
-*.h text eol=lf
-*.hpp text eol=lf
-*.cuh text eol=lf
+# 明确标记常见二进制文件类型，禁用行尾转换，避免图片/压缩包损坏
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.bmp  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.tgz  binary
+*.xz   binary
+*.7z   binary
+*.exe  binary
+*.dll  binary
+
+# 确保这些文本文件类型使用 LF
+*.c    text eol=lf
+*.cpp  text eol=lf
+*.cu   text eol=lf
+*.h    text eol=lf
+*.hpp  text eol=lf
+*.cuh  text eol=lf
 Makefile text eol=lf
-*.mk text eol=lf
-*.sh text eol=lf
-*.py text eol=lf
-*.md text eol=lf
-*.txt text eol=lf
+*.mk   text eol=lf
+*.sh   text eol=lf
+*.py   text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
 *.json text eol=lf
-*.xml text eol=lf
-*.yml text eol=lf
+*.xml  text eol=lf
+*.yml  text eol=lf
 *.yaml text eol=lf
