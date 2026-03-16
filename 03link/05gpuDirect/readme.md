@@ -287,13 +287,62 @@ GDRCopy 是一个基于 GPUDirect RDMA 技术的低延迟 GPU 内存拷贝库，
 
 总结一下就是nccl和nvshmem功能存在一些重叠，但 NVSHMEM 更像是低级 API，在 CUDA 级别提供 put/get（加载/存储，单边）语义，而 NCCL 提供双边、批量的操作，是在 CPU 上调用的。nvshmem是单边的语义，意味着用户还要自己控制同步，更细力度的控制。
 
+### IBGDA与IBRC
+
+以下内容是对博客[Improving Network Performance of HPC Systems Using NVIDIA Magnum IO NVSHMEM and GPUDirect Async](https://developer.nvidia.com/blog/improving-network-performance-of-hpc-systems-using-nvidia-magnum-io-nvshmem-and-gpudirect-async/#proxy-initiated_communication)的翻译
+
+#### [InfiniBand Reliable Connection](https://developer.nvidia.com/blog/improving-network-performance-of-hpc-systems-using-nvidia-magnum-io-nvshmem-and-gpudirect-async/#proxy-initiated_communication)
+
+![Control flow diagram with four components: GPU, host memory, CPU, and NIC. The diagram marks the control flow with numbers corresponding to the sequence of operations described in this section.](assets/readme/communication-bottlenecks-cpu-proxy-b.png)
+
+**使用NVLink进行节点内通信**可以通过GPU流式多处理器（SM）发起的加载和存储指令实现。然而，**节点间通信**则需要向网络接口控制器（NIC）提交工作请求以执行异步数据传输操作。
+
+在引入IBGDA之前，NVSHMEM的 IBRC（[InfiniBand Reliable Connection](https://developer.nvidia.com/blog/improving-network-performance-of-hpc-systems-using-nvidia-magnum-io-nvshmem-and-gpudirect-async/#proxy-initiated_communication)）传输使用CPU上的**代理线程**来管理通信。当使用代理线程时，NVSHMEM执行以下操作序列：
+
+1. 应用程序启动一个CUDA内核，在GPU内存中生成数据。
+2. 应用程序调用一个NVSHMEM操作（例如 `nvshmem_put`）来与另一个处理单元（PE）通信。在执行细粒度或重叠通信时，可以从CUDA内核内部调用此操作。该NVSHMEM操作将一个**工作描述符**写入位于主机内存中的**代理缓冲区**。
+3. NVSHMEM代理线程检测到该工作描述符，并启动相应的网络操作。
+
+以下步骤描述了代理线程与NVIDIA InfiniBand主机通道适配器（HCA，例如ConnectX-6 HCA）交互时所执行的操作序列：
+
+1. CPU创建一个工作描述符，并将其**入队**到位于主机内存中的**工作队列（WQ）缓冲区**。
+2. 该描述符指明了请求的操作（例如RDMA写操作），并包含源地址、目的地址、大小以及其他必要的网络信息。
+3. CPU更新位于主机内存中的**门铃记录（DBR）缓冲区**。该缓冲区用于恢复路径，以防NIC未能成功写入其门铃（DB）。
+4. CPU通过写入NIC的**DB**（NIC硬件中的一个寄存器）来通知NIC。
+5. NIC从WQ缓冲区读取工作描述符。
+6. NIC使用**GPUDirect RDMA**直接从GPU内存复制数据。
+7. NIC将数据传输到远程节点。
+8. NIC通过向主机内存上的**完成队列（CQ）缓冲区**写入一个事件来表明网络操作已完成。
+9. CPU**轮询**CQ缓冲区以检测网络操作的完成。
+10. CPU通知GPU操作已完成。如果存在**GDRCopy**，则CPU直接向GPU内存写入一个通知标志。否则，它会将该标志写入代理缓冲区。GPU轮询相应内存以获取工作请求的状态。
+
+虽然这种方法具有可移植性，并且能为批量数据传输提供高带宽，但它存在两个主要缺点：
+
+1. 代理线程会持续消耗CPU周期。
+2. 对于细粒度传输，由于代理线程存在瓶颈，无法达到NIC的峰值吞吐量。现代NIC每秒可以处理数亿个通信请求。虽然GPU可以以此速率生成请求，但CPU代理的处理速率要低几个数量级，从而为细粒度通信模式造成了瓶颈
+
+#### [InfiniBand GPUDirect Async](https://developer.nvidia.com/blog/improving-network-performance-of-hpc-systems-using-nvidia-magnum-io-nvshmem-and-gpudirect-async/#infiniband_gpudirect_async)
+
+![Control flow diagram shows two components: GPU and NIC, and how a GPU SM submits work descriptors to the NIC. The control flow arrows are marked with numbers, which are described in this section.](assets/readme/ibgda-direct-control-path-b.png)
+
+与代理线程（proxy-initiated communication）发起的通信方式相比，IBGDA利用**GPUDirect异步-内核启动**（GPUDirect Async–Kernel-Initiated）技术，使GPU流式多处理器能够直接与NIC交互。如图所示，该过程包含以下步骤：
+
+1. 应用程序启动CUDA内核，在GPU内存中生成数据。
+2. 应用程序调用NVSHMEM操作（例如`nvshmem_put`）以与其他处理单元通信。NVSHMEM操作**使用SM直接创建NIC工作描述符**，并将其写入WQ缓冲区。与CPU代理方法不同，**此WQ缓冲区位于GPU内存中**。
+3. SM更新DBR缓冲区，该缓冲区同样位于GPU内存。
+4. SM通过写入NIC的DB寄存器来通知NIC。
+5. NIC使用GPUDirect RDMA读取WQ缓冲区中的工作描述符。
+6. NIC使用GPUDirect RDMA读取GPU内存中的数据。
+7. NIC将数据传输至远程节点。
+8. NIC使用GPUDirect RDMA向CQ缓冲区写入完成标志，**直接通知GPU网络操作已完成**。
+
+如图所示，IBGDA**将CPU从通信控制路径中彻底移除**。在使用IBGDA时，GPU与NIC直接交换通信所需的所有信息。WQ和DBR缓冲区也被移至GPU内存，既提高了SM访问它们的效率，又通过GPUDirect RDMA保留了NIC对这些缓冲区的访问能力。
+
 ## 参考
 
 - [Machine Learning Frameworks Interoperability, Part 2: Data Loading and Data Transfer Bottlenecks](https://developer.nvidia.com/blog/machine-learning-frameworks-interoperability-part-2-data-loading-and-data-transfer-bottlenecks/)
 - [Enable faster memory transfers between CPU and GPU with GDRCopy](https://developer.nvidia.com/gdrcopy)
 - [Accelerating IO in the Modern Data Center: Network IO](https://developer.nvidia.com/blog/accelerating-io-in-the-modern-data-center-network-io/)
-
-
 
 # 【研究综述】浅谈GPU通信和PCIe P2P DMA
 

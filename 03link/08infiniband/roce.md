@@ -113,6 +113,12 @@ DeepSeek 总结:
 | **路由能力** | 依赖IB子网管理器和GRH实现跨子网路由。                        | **RoCEv2支持三层路由**：通过IP地址实现跨子网通信，无需依赖子网管理器。 |
 | **封装协议** | 通过IB的GRH（Global Routing Header）携带GID。                | **RoCEv2**：GID封装在IP+UDP头中，UDP目标端口固定为4791。     |
 
+关于LID,GID，GUID的概念可以参考知乎博客
+
+- [RDMA网络LID & GID](https://zhuanlan.zhihu.com/p/702114939)
+
+- [RDMA技术-LID&GID（4）](https://zhuanlan.zhihu.com/p/1966532273181554651)
+
 ### RoCE编程中的常见错误
 
 #### Unable to Connect the HCA's through the link
