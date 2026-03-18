@@ -1214,11 +1214,31 @@ uint32_t value = *triggerCnt;  // 读取GPU写入的值
 当 lane_mask = 1
 对于 laneID = 0x00,0x01,0x10,0x11的lane，需要与 0x01 异或，即从 laneID = 0x01,0x00,0x11,0x10的 lane 获取数据，即相邻的 lane 交换数据
 
+当 lane_mask = 2
+对于 laneID = 0x00,0x01,0x10,0x11的lane，需要与 0x10 异或，即从 laneID = 0x10,0x11,0x00,0x01的 lane 获取数据，即 lane0与lane2交换数据，lane1与lane3交换数据
+
 当 lane_mask = 3
 对于 laneID = 0x00,0x01,0x10,0x11的lane，需要与 0x11 异或，即从 laneID = 0x11,0x10,0x01,0x00的 lane 获取数据，即 lane0与lane3交换数据，lane1与lane2交换数据
 ```
 
 ![img](assets/readme/v2-d5785253a7fcf167498b16f14a27f655_1440w.jpg)
+
+为了方便理解，假设`warpSize = 16`（实际 warpSize 是 32），用 `__shfl_xor_sync(active_mask, val, lane_mask)` 把`lane_mask = 7、8`的配对关系画出来（只看 `lane_id ^ lane_mask` 的结果，假设所有线程都 active）。
+
+![image-20260316170636827](assets/readme/image-20260316170636827.png)
+
+`lane_mask` 为 2 的幂（1,2,4,8,16…）是最常用的：
+
+因为这样只翻转某一位，比如最低位 / 次低位 / 第三位 / 最高位。
+
+配对具有“分层、分区”的很好对称性，是典型的蝶形网络的每一层：
+
+- `mask=8`：每16个一组，低半区 0~7 对高半区 8~15（0↔8,1↔9,…）；
+- `mask=4`：每 8 个一组，内部低半区 0~3 ↔ 4~7；
+- `mask=2`：每 4 个一组，内部低半区 0~1 ↔ 2~3；
+- `mask=1`：每 2 个一组，0↔1,2↔3,…。
+
+- 这时的对称性非常“整齐”：以某一位做镜像，把 lane 成对分组。
 
 #### 与共享内存方案的对比
 

@@ -1265,7 +1265,9 @@ static inline void post_send_db(struct mlx5_qp *qp, struct mlx5_bf *bf,
 
 fifo地址是硬件中的一块资源在host内存上的映射，它是有固定深度的（孔径），如APERTURE=8KB（这里面设置APERTURE=64字节方便发现问题，可以发现上图出错的内存块刚好也是64字节乱序），那么把fifo中的数据传输走，配置 IB write的工作请求时，每一个WR的传输大小不能超过APERTURE，则需要将真实传输的数据量按APERTURE大小的块切分，然后通过IB write传输。对于每一个APERTURE块的内存，用一个WR来描述，最终以WR链表的形式一次性下发给IB。
 
-问题就在于WR是严格的按照链表的顺序提交给IB驱动，但是完成顺序可能不严格遵循提交顺序。对于普通的DDR内存，完成顺序不会影响数据的正确性。但是对于fifo，低地址的数据先从fifo里出来，本应该被第一个WR执行，但可能被后面的WR执行了，这样就造成了数据块的乱序。
+问题就在于WR是严格的按照链表的顺序提交给IB驱动，但是完成顺序可能不严格遵循提交顺序。对于普通的DDR内存，完成顺序不会影响数据的正确性。但是对于fifo，低地址的数据先从fifo里出来，本应该被第一个WR读走，但可能被后面的WR读走了，这样就造成了数据块的乱序。
+
+【我的理解：如果是从 DDR 内存传输数据到远端的 FIFO，则没有乱序现象，反过来则不行。最根本的问题在于网卡从FIFO里读数据并传输到远端这一步被FIFO阻塞，导致下一个WR读到了本应该第一个WR要读的数据。】
 
 **WR链表的执行模式**：
 
@@ -1282,6 +1284,126 @@ fifo地址是硬件中的一块资源在host内存上的映射，它是有固定
 | **执行方式** | 按提交顺序执行，但可并行处理未阻塞WR | 所有SGE作为单次操作的内存片段整体传输 |
 
 参考文档《V1r1_2_1.Release_12062007.pdf》InfiniBand Architecture Specification Volume 1 Release 1.2.1的章节10.8.3.3 SEND QUEUE ORDERING RULES
+
+### 理解 fence
+
+在 RDMA 编程中，`IBV_SEND_FENCE` 是一个经常被提起、却容易被误用的标志位。很多人知道***“Read/Atomic 之后要加 Fence”***，但为什么需要，以及不加会出什么问题，其实并不清楚。本文从RDMA 操作语义、硬件逻辑、PCIe 事务规则和网络乱序几个角度，把这个问题讲清楚。
+
+在 RDMA verbs 里，发送队列（SQ）上的 WQE 大致有几类：
+
+1. RDMA Write
+
+    - 本端网卡把本地内存的数据，直接写到远端内存。
+    - 从语义上看，类似“ `memcpy(dst_remote, src_local, len)`”。
+    - 通常对应 PCIe 上的 **Posted** Memory Write（发出去就算本地完成）。
+
+2. RDMA Read
+
+    - 本端网卡向远端发起“读远端内存”的请求，远端网卡从远端内存读出数据，通过网络回传给本端，再写入本地内存。
+    - 语义类似“ `memcpy(dst_local, src_remote, len)`”。
+    - 对应一种 **Non-Posted** 操作：必须等远端处理并返回响应，整个链路完成后才能算“这次 Read 完成”。
+
+3. Atomic（原子操作）
+
+    - 在**远端内存**上执行的原子操作，例如：`IBV_WR_ATOMIC_FETCH_AND_ADD`，`IBV_WR_ATOMIC_CMP_AND_SWP`
+    - 对同一地址的多个 Atomic，硬件保证顺序性和原子性。
+
+后文提到的 “Read/Atomic” 指的就是这两类**需要远端响应 / 改远端值**，并依赖完整链路完成的操作。
+
+
+
+**什么是 Fence？**
+
+在 InfiniBand 规范中，Fence 通过 `ibv_send_wr` 结构体中的 `send_flags` 设置 `IBV_SEND_FENCE`。
+
+**fence 的实现逻辑：**
+
+当网卡（HCA）的调度器扫描到带有 Fence 标志的 WQE（工作请求）时：
+
+   - 检查计数器：它会检查该 QP 上是否有**尚未完成的 RDMA Read / Atomic** 操作。
+   - 挂起机制：如果有，**暂时不执行当前这个带 Fence 的 WQE**，直到这些 Read/Atomic 全部完成（收到响应 / ACK）。
+
+通俗地说：**Fence 让这条 WQE 以前的 Read/Atomic 必须“真·做完”，之后的操作才能往外发。**
+
+【个人理解：结合上面的 [fifo 内存乱序现象](#解决RDMA链式传输fifo内存数据出现乱序的方法)，Fence 不仅等待Read/Atomic 必须“真·做完“，对Write请求也是如此。】
+
+> InfiniBand Architecture Specification Volume 1 的 9.5 TRANSACTION ORDERING 章节有描述到：
+>
+> 一个带Fence的请求会被阻塞直到Read/Atomic 请求完成。
+>
+> **C9-31:** A work request with the fence attribute set shall block until all prior RDMA Read and Atomic WRs have completed。
+
+**软件 Fence vs 硬件 Fence**：
+
+在应用层轮询 CQ（完成队列），等 Read 的 CQE 出来之后再 post 下一条 WQE，这种手法可以看作“软件 Fence”。
+
+   - 软件 Fence：语义最直观，但性能差，CPU 参与，线程调度和轮询都增加了延迟和开销。
+   - 硬件 Fence：把“等前序操作完成”这件事交给 HCA，纯硬件实现。在等待某个 QP 的同时，HCA 仍可处理其他 QP 的流量。
+
+#### 理解 Read/Atomic 需要 Fence 的原因
+
+典型模式：
+
+​    WQE1：RDMA Read（从远端读配置信息到本地）
+​    WQE2：RDMA Write（把远端某个状态位写成“已读完”）
+
+很多高性能协议中，远端软件会用“状态位 / 信号量”来判断你是不是已经读完数据、可以做下一步（例如回收 buffer、切换配置等）。
+
+不加 Fence 时，HCA 的行为大致是：
+
+1. 读到 WQE1，立刻发 Read Request 到远端。
+2. 紧接着读到 WQE2，又立刻发 Write 报文到远端（因为没有 Fence，调度器不会等待 Read 完成）。
+
+注意：这里的“立即发出 Write”指的是**在 HCA 视角/本端发包顺序上**，而不是保证远端“先看到 Read 效果再看到 Write 效果”。
+
+在复杂网络和硬件优化存在的前提下，很可能Write 报文走了一条不拥塞的路径，很快就到达远端，Read 的响应（Data Response）因为路径/拥塞等原因更晚回来；或在 PCIe 层面，后发的 Posted Write 在时间上“超车”了先发的 Non-Posted Read。
+
+这时的观感就是：从 A 本地看：我先发了 Read，再发了 Write；从 B 远端看：我先收到了那个把状态位写成“已读完”的 Write；但 A 本地用于接收 Read 数据的 buffer 里，数据还没被真正写完（甚至还没开始写）。于是就产生了远端看到状态变成了“已读完”，但实际上本端还没读到正确的数据。
+
+这并不是说“WQE 顺序乱了”，而是：**Write（状态位“已读完”）在“时序 / 可见性”上，跑到了那次 Read 真正完成的前面。**
+
+给 WQE2（Write 状态位）加上 Fence 之后：
+
+- HCA 遇到带 Fence 的 WQE2 时，会检查前面是否有未完成的 RDMA Read/Atomic。
+- 如果 WQE1 的 Read 还没完成，则挂起 WQE2，不会把对应的 Write 报文发出去。
+
+- 只有在 WQE1 的 Read 响应数据已经回到本地，写入本地 buffer，并被标记为完成后，才会真正发出 WQE2 的 Write。
+
+这样保证：本端真正“读到正确数据”的时间点，一定早于远端看到“状态位变成已读完”的时间点。从逻辑上保证了：**远端依据状态位做决策时，本端的 Read/Atomic 已经确实完成。**
+
+可以把 Fence 的作用概括为三个层面：
+
+1. 远端软件安全
+
+   - 常见模式：远端软件轮询一个“状态位 / 信号量”，判断你是否已经读完 / 用完某块数据。
+   - 如果不加 Fence，写这个状态位的 Write 可能在 Read 完成之前“被远端先看到”，
+     远端就可能提前复用 / 释放 buffer，以及提前修改仍被你依赖的数据，导致你本端读到的数据不完整或已被篡改。
+   - Fence 可以保证：**只有当本端 Read/Atomic 真正完成，那个“我已经读完”的 Write 才会出现在远端。**
+
+2. 本地/远端逻辑一致性：防止“写超越读”
+
+   - 从程序逻辑看：你写的是“先 Read（看旧值），再 Write（写状态 / 新值）”。
+   - 但在 PCIe + 网络层上，如果写在时序上跑到读前面，就变成了“先 Write 后 Read”。
+   - 这会让“程序里看起来顺序正确”的代码，在真实硬件执行上产生反直觉的结果。
+   - Fence 保证在关键依赖点上：**程序顺序 ≈ 执行顺序**。
+
+3. 原子性保障
+
+   - 例如：先 Read 某个计数 / 版本号，然后再发一个 Atomic 去更新它。
+   - 如果不加 Fence，Atomic 可能在本次 Read 真正完成前就已经在远端执行，导致你读到的不是“修改前的旧值”，而是已经被自己更新过的新值。
+   - Fence 确保：**Read 一定看到的是 Atomic 修改前的一致快照**。
+
+#### Fence 出现的根本原因
+
+Fence 之所以存在，是为了解决两个物理层面的性能优化副作用：
+
+1.**PCIe 层的乱序（写超越读）**
+
+根据 PCIe 规范，为了提高效率，允许某些事务乱序：Posted Write（写） 可以超越 Non-Posted Read（读）。如果没有 Fence 约束，HCA 从内存获取 WQE 的顺序可能没问题，但在实际执行时，PCIe 的乱序策略可能导致逻辑崩塌。
+
+2.**网络层的乱序（Adaptive Routing）**
+
+在支持乱序接收（OOO）或自适应路由的 RDMA 网络中，后发的报文可能绕过拥塞路径，先于先发的报文到达目的地。Fence 强制 HCA 等待前序操作完全结束后再发下一包，从源头规避了网络乱序风险。
 
 ## ibv_send_flags
 
@@ -1639,6 +1761,8 @@ target_rate 指【目标速率】，**即曾经跑到的、刚好没有出现拥
 > 超积极增加：发现一直很安全，就更大步地线性加速，尽量吃满空闲带宽。
 
 参考：
+
+- DCQCN 论文https://asterfusion.com/wp-content/uploads/2025/09/dcqcn-sigcomm15.pdf
 
 - [RDMA拥塞控制 - DCQCN零基础入门](https://zhuanlan.zhihu.com/p/1984338554646705762)
 
