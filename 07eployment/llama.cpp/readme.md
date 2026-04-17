@@ -134,4 +134,4 @@ $ curl http://127.0.0.1:8080/v1/chat/completions   -H "Content-Type: application
 
 ### 在浏览器中与大模型交互
 
-![image-20260312101536660](assets/readme/image-20260312101536660.png)
+![image-20260312101536660](assets/readme/llama.cpp-server.png)
